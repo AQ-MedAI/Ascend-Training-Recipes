@@ -14,7 +14,6 @@ from pathlib import Path
 
 from safetensors import safe_open
 
-
 DEFAULT_KEYS = [
     "embed.weight",
     "head.weight",

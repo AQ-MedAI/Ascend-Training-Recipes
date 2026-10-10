@@ -15,8 +15,8 @@ def main():
     if not paths:
         parser.error(f"No .metadata found under {root}")
 
-    import torch
     import megatron.core
+    import torch
     from torch.distributed.checkpoint import FileSystemReader
 
     print(f"torch={torch.__version__}, mcore={megatron.core.__version__}")
@@ -30,14 +30,17 @@ def main():
         print(f"state_entries={len(entries)}, mcore_entries={len(mcore_data)}")
         print(f"entry_types={dict(Counter(type(v).__name__ for v in entries.values()))}")
         print(f"prefix_counts={dict(Counter('.'.join(k.split('.')[:3]) for k in entries))}")
-        selected = [k for k in entries if any(s in k for s in (
-            "linear_q_up_proj", "compressor", "param_state", "dp_group_idx"))]
+        selected = [
+            k for k in entries if any(s in k for s in ("linear_q_up_proj", "compressor", "param_state", "dp_group_idx"))
+        ]
         print(f"\n[related entries] {len(selected)} total; showing at most 40")
         for key in selected[:40]:
             value = entries[key]
             shape = getattr(value, "size", None)
             chunks = getattr(value, "chunks", [])
-            print(f"{key}: type={type(value).__name__}, shape={shape}, chunks={len(chunks)}, mcore={mcore_data.get(key)}")
+            print(
+                f"{key}: type={type(value).__name__}, shape={shape}, chunks={len(chunks)}, mcore={mcore_data.get(key)}"
+            )
         target = "chained_0.optimizer.state.exp_avg.decoder.layers.2.self_attention.linear_q_up_proj.weight"
         print(f"\n[target] {target}")
         print(f"in_state_metadata={target in entries}, in_mcore_data={target in mcore_data}")

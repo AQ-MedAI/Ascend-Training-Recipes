@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 from collections import defaultdict
 from pathlib import Path
@@ -161,8 +160,7 @@ def is_complete_output(dst: Path, src: Path, num_layers: int) -> bool:
 
     try:
         return all(
-            (dst / filename).is_file() and (dst / filename).stat().st_size > 0
-            for filename in set(weight_map.values())
+            (dst / filename).is_file() and (dst / filename).stat().st_size > 0 for filename in set(weight_map.values())
         )
     except OSError:
         return False

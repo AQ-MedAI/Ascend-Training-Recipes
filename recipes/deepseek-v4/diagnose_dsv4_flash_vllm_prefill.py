@@ -144,8 +144,7 @@ def main() -> None:
     )
     generated_ids = outputs[0].outputs[0].token_ids
     print(
-        f"[diagnose] generate done in {time.monotonic() - generate_start:.1f}s: "
-        f"token_ids={generated_ids}",
+        f"[diagnose] generate done in {time.monotonic() - generate_start:.1f}s: " f"token_ids={generated_ids}",
         flush=True,
     )
 
@@ -179,8 +178,7 @@ async def run_async(
             raise RuntimeError("AsyncLLM returned no output")
         generated_ids = final_output.outputs[0].token_ids
         print(
-            f"[diagnose] generate done in {time.monotonic() - generate_start:.1f}s: "
-            f"token_ids={generated_ids}",
+            f"[diagnose] generate done in {time.monotonic() - generate_start:.1f}s: " f"token_ids={generated_ids}",
             flush=True,
         )
     finally:

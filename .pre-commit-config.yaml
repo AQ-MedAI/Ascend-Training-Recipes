@@ -1,0 +1,50 @@
+# This configuration applies only to this repository.
+minimum_pre_commit_version: '2.9.2'
+exclude: ^licenses/
+
+repos:
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        files: ^(recipes|tools)/.*\.pyi?$
+        args: [--profile=black, --line-length=120]
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        files: ^(recipes|tools)/.*\.pyi?$
+        args: [--line-length=120]
+
+  - repo: https://github.com/PyCQA/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
+        files: ^(recipes|tools)/.*\.pyi?$
+        exclude: (^|/)__init__\.py$|_pb2(?:_grpc)?\.py$
+        args:
+          - --max-line-length=120
+          - --ignore=E721,W503,E203,E266,E741
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.17.0
+    hooks:
+      - id: mypy
+        files: ^(recipes|tools)/.*\.pyi?$
+        args:
+          - --ignore-missing-imports
+          - --follow-imports=skip
+          - --namespace-packages
+          - --no-strict-optional
+          - --show-error-codes
+          - --explicit-package-bases
+        additional_dependencies: [types-requests, types-PyYAML]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+        exclude: \.(txt|jinja)$
+      - id: check-yaml

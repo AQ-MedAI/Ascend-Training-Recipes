@@ -441,15 +441,3 @@ python3 -m verl.trainer.main_ppo \
     "${REWARD[@]}" \
     "${EXTRA[@]}" \
     "$@" 2>&1 | tee /path/to/k26_cutlayer_4H_fullvocab${start_time}_k26_cutlayer_mopd_2teacher_fullvocab.log
-
-
-
-
-
-
-
-
-
-
-
-
