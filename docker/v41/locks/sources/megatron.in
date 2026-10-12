@@ -1,0 +1,16 @@
+# Dependency declarations from https://github.com/NVIDIA/Megatron-LM @ a845aa7e12b3a117e24c2352b9e3e60bad2e3a17
+einops
+flask-restful
+nltk
+pytest
+pytest-cov
+pytest_mock
+pytest-random-order
+sentencepiece
+tiktoken
+wrapt
+zarr
+wandb
+tensorstore!=0.1.46,!=0.1.72
+torch
+nvidia-modelopt[torch]>=0.23.2; sys_platform != "darwin"

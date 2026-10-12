@@ -37,7 +37,7 @@ V4.1 rollout 源码：
 - [vLLM](https://github.com/vllm-project/vllm)：`a97dacb7106ee49f39f3d1fc6ae1800ff724e01d`。
 - [vLLM-Ascend](https://github.com/GDzhu01/vllm-ascend)：`e67ab649500fcb21fd2139da17d0e566f7364301`。
 
-仅安装这两个包不足以运行 V4.1；还需权重同步 runtime、原生算子及其构建环境。Engram hash 实现由 MindSpeed-LLM 的 V4.1 模型目录提供。这些组件的独立分发和安装方式尚未齐备。V4 rollout 的完整源码/补丁发布也待补齐。
+V4.1 权重同步 runtime 已随本仓库 `workspace/rollout/dsv41/runtime` 提供；原生算子由镜像构建。Engram hash 由 MindSpeed-LLM 提供。使用方式见 [镜像分层说明](../docker/v41/README.md)，Python 依赖锁定及 NPU 验收仍待补齐。V4 rollout 的完整源码/补丁发布也待补齐。
 
 ## K2.6
 

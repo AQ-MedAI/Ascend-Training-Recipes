@@ -1,0 +1,2 @@
+# Compatibility alias: both roles use the same runtime environment.
+-r runtime.in

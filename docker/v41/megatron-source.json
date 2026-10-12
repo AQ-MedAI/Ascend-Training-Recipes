@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/NVIDIA/Megatron-LM",
+  "base_commit": "a845aa7e12b3a117e24c2352b9e3e60bad2e3a17",
+  "package_version": "0.12.1",
+  "patch": "megatron-v41.patch",
+  "patch_sha256": "5a0249f13a55966e83fee2c03b9c37c7c2b00118c4a0550b717594152e02016c",
+  "patched_files": {
+    "megatron/core/dist_checkpointing/strategies/filesystem_async.py": "5df5eae15e6c4f4a42082f389fd0d112be95ff92d16456e3953a0789f2b935fe",
+    "megatron/core/dist_checkpointing/strategies/torch.py": "6522f00530079d43a7c29144ccef945bc7d91dcc40ba3958376e53f490e29f27",
+    "megatron/core/distributed/distributed_data_parallel.py": "caa87a6a97e0cd2c0e67c7f79384822baba5a3e0dea6ec2a23d1ab9ea58aa4b5",
+    "megatron/core/optimizer/__init__.py": "5a165a39fcb83d00598d1b0ef7b57e983976e570746831361279b89833b511bc",
+    "megatron/core/optimizer/cpu_offloading/hybrid_optimizer.py": "8fa03a8e7e40f322fce44167924f59526e425b57b84a1cb1f88c0bd2c3f9db11",
+    "megatron/core/optimizer/distrib_optimizer.py": "416ab1ca1ede9a96ce33b0e2c6ea38d24eb6bc959aa0d51a805ce7111b966c66",
+    "megatron/core/pipeline_parallel/p2p_communication.py": "f6501551688e2739754b8fe6a26f3ae3ff0d29564e12fabe759b190064bae28a",
+    "megatron/core/transformer/transformer_config.py": "b72fe3beaac247861f3b330402d809a178edd55252415685c87e58f0ec350c56"
+  },
+  "validation": "Patch reconstruction verified; image build and NPU acceptance pending"
+}

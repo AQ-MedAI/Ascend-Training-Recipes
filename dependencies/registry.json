@@ -73,7 +73,8 @@
         "repository": "https://github.com/GDzhu01/vllm-ascend",
         "commit": "e67ab649500fcb21fd2139da17d0e566f7364301"
       },
-      "external_runtime_required": true
+      "external_runtime_required": false,
+      "recipe_runtime": "workspace/rollout/dsv41/runtime"
     },
     "v4": {
       "status": "pending_complete_source_and_patch_release"
@@ -85,7 +86,7 @@
   "unresolved": [
     "Ascend driver, CANN, PyTorch and torch-npu version matrix",
     "V4/V4.1 matching Megatron-LM and native operators",
-    "V4.1 rollout runtime and build environment",
+    "V4.1 Python dependency locks and image/NPU acceptance",
     "K2.6 matching MindSpeed, Megatron-LM and Megatron-Bridge",
     "Public datasets and reward examples"
   ],

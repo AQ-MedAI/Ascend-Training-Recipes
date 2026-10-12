@@ -1,0 +1,7 @@
+# Preserve these versions during training dependency installation.
+torch==2.10.0
+torch-npu==2.10.0.post4
+triton-ascend==3.2.2
+triton==3.5.0
+# Shared NumPy baseline for the Ascend training stack.
+numpy==1.26.4

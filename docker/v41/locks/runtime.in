@@ -1,0 +1,23 @@
+# Unified V4.1 training and rollout dependencies; source conflicts must be resolved.
+-c runtime-constraints.txt
+-r build.in
+-c build.lock
+-r ../hardware-requirements.txt
+-c ../hardware-constraints.txt
+numpy==1.26.4
+-r sources/megatron.in
+-r sources/megatron-core.in
+-r sources/mindspeed.in
+-r sources/mindspeed-llm.in
+-r sources/verl.in
+safetensors
+einops
+bytecode
+mathruler
+qwen-vl-utils
+hf-transfer
+TransferQueue==0.1.7
+-r sources/vllm.in
+-r sources/vllm-ascend.in
+googleapis-common-protos
+ray[default]>=2.41.0

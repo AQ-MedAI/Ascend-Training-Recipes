@@ -9,16 +9,18 @@ fi
 
 # Fork sources default to the pinned submodules; external runtimes use DEPENDENCY_ROOT.
 RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-DEPENDENCY_ROOT="${DEPENDENCY_ROOT:-/path/to/dsv4_flash_npu_dependency}"
+DEPENDENCY_ROOT="${DEPENDENCY_ROOT:-/opt/ascend-training}"
 VERL_ROOT="${VERL_ROOT:-${RECIPE_ROOT}/third_party/verl}"
 MEGATRON_ROOT="${MEGATRON_ROOT:-${DEPENDENCY_ROOT}/Megatron-LM}"
 MINDSPEED_ROOT="${MINDSPEED_ROOT:-${RECIPE_ROOT}/third_party/MindSpeed}"
 MINDSPEED_LLM_ROOT="${MINDSPEED_LLM_ROOT:-${RECIPE_ROOT}/third_party/MindSpeed-LLM}"
 MBRIDGE_ROOT="${MBRIDGE_ROOT:-${RECIPE_ROOT}/third_party/mbridge}"
-VLLM_ROOT="${VLLM_ROOT:-${DEPENDENCY_ROOT}/vllm}"
-VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-${DEPENDENCY_ROOT}/vllm-ascend}"
+VLLM_ROOT="${VLLM_ROOT:-${DEPENDENCY_ROOT}/workspace/rollout/dsv41/build-src/vllm}"
+VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-${DEPENDENCY_ROOT}/workspace/rollout/dsv41/build-src/vllm-ascend}"
 
-export PYTHONPATH="${PYTHONPATH:-}"
+export RECIPE_ROOT DEPENDENCY_ROOT VERL_ROOT MINDSPEED_ROOT MINDSPEED_LLM_ROOT MBRIDGE_ROOT MEGATRON_ROOT VLLM_ROOT VLLM_ASCEND_ROOT
+export V41_CONFIG_SOURCE="${V41_CONFIG_SOURCE:-$VLLM_ASCEND_ROOT/vllm_ascend/deepseek_v41_config.py}"
+export PYTHONPATH="$RECIPE_ROOT:${PYTHONPATH:-}"
 
 if [[ -d "${MBRIDGE_ROOT}/mbridge" ]]; then
     export PYTHONPATH="${MBRIDGE_ROOT}:${PYTHONPATH}"
@@ -90,7 +92,7 @@ export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
 
 # ------------------------- Paths -------------------------
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-ROOT="${WORK_DIR:-${DEPENDENCY_ROOT}}"
+ROOT="${WORK_DIR:-${RECIPE_ROOT}}"
 ENGRAM_HASH_SOURCE="${ENGRAM_HASH_SOURCE:-${MINDSPEED_LLM_ROOT}/mindspeed_llm/tasks/models/transformer/deepseek41/engram_hash.py}"
 if [[ ! -f "$ENGRAM_HASH_SOURCE" ]]; then
     printf 'Missing Engram hash implementation: %s; use a MindSpeed-LLM checkout with V4.1 Engram support, or set ENGRAM_HASH_SOURCE.\n' "$ENGRAM_HASH_SOURCE" >&2
@@ -120,7 +122,7 @@ if [[ -n "$ENGRAM_CROP" ]]; then
 else
     export ENGRAM_SOURCE="${ENGRAM_SOURCE:-$MODEL}"
 fi
-export ROLLOUT_PYTHON="${ROLLOUT_PYTHON:-$ROOT/workspace/rollout/dsv41/.venv/bin/python}"
+export ROLLOUT_PYTHON="${ROLLOUT_PYTHON:-$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')}"
 export V41_NATIVE_TRAINER=1
 if [[ -n "$ENGRAM_CROP" ]]; then
     ROLLOUT_TP="${ROLLOUT_TP:-8}"
@@ -314,6 +316,13 @@ EXTRA_CONFIG=(
     +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'${P2P_HCCL_BUFFSIZE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ASCEND_ENABLE_FLASHCOMM1="'${VLLM_ASCEND_ENABLE_FLASHCOMM1}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH="'${PYTHONPATH}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.DEPENDENCY_ROOT="'${DEPENDENCY_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_LLM_ROOT="'${MINDSPEED_LLM_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MBRIDGE_ROOT="'${MBRIDGE_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ROOT="'${VLLM_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ASCEND_ROOT="'${VLLM_ASCEND_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.V41_CONFIG_SOURCE="'${V41_CONFIG_SOURCE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY="'${TRANSFORMERS_VERBOSITY}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_NPU_SOCKET_PORT_RANGE="'${HCCL_NPU_SOCKET_PORT_RANGE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_HOST_SOCKET_PORT_RANGE="'${HCCL_HOST_SOCKET_PORT_RANGE}'"

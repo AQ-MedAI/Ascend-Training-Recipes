@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "group": "native",
+      "path": "catlass.tar.gz",
+      "sha256": "f21973a067b8eeec94075e69b88f5f06b6b3900a5f694426af0ac793bdbe243e",
+      "source_repository": "https://gitcode.com/cann/catlass.git",
+      "source_commit": "41bf90da655bba3c66d0acd7e00abe33960ecfd6",
+      "transport": "git-blob",
+      "repository": "https://gitcode.com/MrJVium/workspace.git",
+      "commit": "86bf5287c347090e099ac8a36e35dd7f714eba39",
+      "source_path": "catlass.tar.gz"
+    },
+    {
+      "group": "native",
+      "path": "catlass_git.tar.gz",
+      "sha256": "6583d33920c62da404f83635fb4beec636f4be0aea62ec9b460a3bed3b0ecb15",
+      "source_repository": "https://gitcode.com/cann/catlass.git",
+      "source_commit": "41bf90da655bba3c66d0acd7e00abe33960ecfd6",
+      "transport": "git-blob",
+      "repository": "https://gitcode.com/MrJVium/workspace.git",
+      "commit": "86bf5287c347090e099ac8a36e35dd7f714eba39",
+      "source_path": "catlass_git.tar.gz"
+    },
+    {
+      "group": "native",
+      "path": "makeself-release-2.5.0-patch1.tar.gz",
+      "sha256": "bfa730a5763cdb267904a130e02b2e48e464986909c0733ff1c96495f620369a",
+      "url": "https://gitcode.com/cann-src-third-party/makeself/releases/download/release-2.5.0-patch1.0/makeself-release-2.5.0-patch1.tar.gz"
+    },
+    {
+      "group": "native",
+      "path": "include.zip",
+      "sha256": "a22461d13119ac5c78f205d3df1db13403e58ce1bb1794edc9313677313f4a9d",
+      "url": "https://gitcode.com/cann-src-third-party/json/releases/download/v3.11.3/include.zip"
+    },
+    {
+      "group": "native",
+      "path": "abseil-cpp-20230802.1.tar.gz",
+      "sha256": "987ce98f02eefbaf930d6e38ab16aa05737234d7afbab2d5c4ea7adbe50c28ed",
+      "url": "https://gitcode.com/cann-src-third-party/abseil-cpp/releases/download/20230802.1/abseil-cpp-20230802.1.tar.gz"
+    },
+    {
+      "group": "native",
+      "path": "protobuf-25.1.tar.gz",
+      "sha256": "9bd87b8280ef720d3240514f884e56a712f2218f0d693b48050c836028940a42",
+      "url": "https://gitcode.com/cann-src-third-party/protobuf/releases/download/v25.1/protobuf-25.1.tar.gz"
+    },
+    {
+      "name": "ops-transformer",
+      "ref": "1461cca857ff3b2018404c0275e80e7aa13a3fc9",
+      "file": "ops-transformer-1461cca857ff3b2018404c0275e80e7aa13a3fc9.tar.gz",
+      "sha256": "5718004bf30e474141700ec6c5cae0d32e991976f1ab7079342b5c996b4c6534",
+      "url": "https://codeload.github.com/hicann/ops-transformer/tar.gz/1461cca857ff3b2018404c0275e80e7aa13a3fc9",
+      "group": "premix",
+      "path": "third_party/mhc-premix/ops-transformer-1461cca857ff3b2018404c0275e80e7aa13a3fc9.tar.gz"
+    },
+    {
+      "name": "opbase",
+      "ref": "0a83b915a6f6be49a03b907713d6f000b3dea1ea",
+      "file": "opbase-0a83b915a6f6be49a03b907713d6f000b3dea1ea.tar.gz",
+      "sha256": "2bbcc4779cee2358b47be051bfe3a5f1dd3274cc9e601e9a42dd2c8eb8648ea6",
+      "url": "https://codeload.github.com/hicann/opbase/tar.gz/0a83b915a6f6be49a03b907713d6f000b3dea1ea",
+      "group": "premix",
+      "path": "third_party/mhc-premix/opbase-0a83b915a6f6be49a03b907713d6f000b3dea1ea.tar.gz"
+    },
+    {
+      "name": "ops-tensor",
+      "ref": "deea03a7d112b002a986783e39d4f91c92949518",
+      "file": "ops-tensor-deea03a7d112b002a986783e39d4f91c92949518.tar.gz",
+      "sha256": "227b6f164b2402af3eaac953399a1190a5d75aea6f1783713c9ff1d14ba843d3",
+      "url": "https://codeload.github.com/hicann/ops-tensor/tar.gz/deea03a7d112b002a986783e39d4f91c92949518",
+      "group": "premix",
+      "path": "third_party/mhc-premix/ops-tensor-deea03a7d112b002a986783e39d4f91c92949518.tar.gz"
+    },
+    {
+      "name": "catlass",
+      "ref": "769cd40a8716b28650b6bebb08db4834eea4462f",
+      "file": "catlass-769cd40a8716b28650b6bebb08db4834eea4462f.tar.gz",
+      "sha256": "30cf4ffc84ace54be2f591cfd0ad9000b54e73b03948c706b383854dc8159376",
+      "url": "https://codeload.github.com/hicann/catlass/tar.gz/769cd40a8716b28650b6bebb08db4834eea4462f",
+      "group": "premix",
+      "path": "third_party/mhc-premix/catlass-769cd40a8716b28650b6bebb08db4834eea4462f.tar.gz"
+    },
+    {
+      "name": "cmake",
+      "ref": "master-058",
+      "file": "cmake-master-058.tar.gz",
+      "sha256": "03d63afb6ea714208d39bdbc02276eeeb0793a28137c7c8f765a55ff1a5f3e18",
+      "url": "https://codeload.github.com/hicann/cmake/tar.gz/master-058",
+      "group": "premix",
+      "path": "third_party/mhc-premix/cmake-master-058.tar.gz"
+    },
+    {
+      "name": "eigen",
+      "ref": "5.0.0",
+      "file": "eigen-5.0.0.tar.gz",
+      "sha256": "93f7f0462988b934e632a9fba58af55192ffceae38e8f46233f4f62cb1e79370",
+      "url": "https://cann-3rd.obs.cn-north-4.myhuaweicloud.com/eigen/eigen-5.0.0.tar.gz",
+      "group": "premix",
+      "path": "third_party/mhc-premix/eigen-5.0.0.tar.gz"
+    },
+    {
+      "name": "tensor-api",
+      "ref": "fd51475d8ceb26eb21befffe4391528bc16726a3",
+      "file": "asc-devkit-fd51475d8ceb26eb21befffe4391528bc16726a3.tar.gz",
+      "sha256": "cb152475811a8356c52ced05e8758584c9d623a01ed7763aa3ae979b6dc530cd",
+      "url": "https://codeload.github.com/hicann/asc-devkit/tar.gz/fd51475d8ceb26eb21befffe4391528bc16726a3",
+      "group": "premix",
+      "path": "third_party/mhc-premix/asc-devkit-fd51475d8ceb26eb21befffe4391528bc16726a3.tar.gz"
+    },
+    {
+      "name": "abseil-cve-patch",
+      "ref": "20230802.1-h0",
+      "file": "backport-CVE-2025-0838.patch",
+      "sha256": "a4e4ef6fc4f4c1ed871a3472c5e650068aaadaad2adfef2c8ccb00918bb36d8c",
+      "url": "https://gitcode.com/cann-src-third-party/abseil-cpp/releases/download/20230802.1-h0/backport-CVE-2025-0838.patch",
+      "group": "premix",
+      "path": "third_party/mhc-premix/backport-CVE-2025-0838.patch"
+    }
+  ]
+}

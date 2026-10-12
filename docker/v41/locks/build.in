@@ -1,0 +1,13 @@
+# Python build tools for Linux aarch64 / Python 3.12 (not a training runtime lock).
+attrs==24.2.0
+cmake>=3.26.1,<4
+ninja
+packaging>=24.2
+setuptools>=77.0.3,<81
+setuptools-scm>=8
+setuptools-rust>=1.9
+wheel
+jinja2
+pybind11
+pip
+uv==0.11.6

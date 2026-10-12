@@ -1,0 +1,51 @@
+{
+  "mindspeed.in": {
+    "repository": "https://github.com/AQ-MedAI/MindSpeed",
+    "commit": "28c2945cbbafadbb1888eb5bef53195e06ddf44c",
+    "path": "requirements.txt",
+    "source_sha256": "1ce6572c462f4881e6bcfb15c31d131e7ef8d5c4dd0c33b899626d2655ac1a93",
+    "extraction": "requirements file"
+  },
+  "mindspeed-llm.in": {
+    "repository": "https://github.com/AQ-MedAI/MindSpeed-LLM",
+    "commit": "9e2327037ffe651c72ef8f5807751d022805227d",
+    "path": "requirements.txt",
+    "source_sha256": "0f1827c534de51cd6c26b6ffcddba9e06340bdfcbb68a0201ac28fbe6c13f07e",
+    "extraction": "requirements file"
+  },
+  "verl.in": {
+    "repository": "https://github.com/AQ-MedAI/verl",
+    "commit": "c73f779e4d6ebbf6172c3b020e47b3fd2f346d52",
+    "path": "setup.py",
+    "source_sha256": "ecdbe4dd362dcb578b8fbea5a56586ca89ef8822b2d992ed4d86e4268d5135ab",
+    "extraction": "install_requires literal"
+  },
+  "megatron.in": {
+    "repository": "https://github.com/NVIDIA/Megatron-LM",
+    "commit": "a845aa7e12b3a117e24c2352b9e3e60bad2e3a17",
+    "path": "requirements/pytorch_25.03/requirements.txt",
+    "source_sha256": "ee899f3e69c46e5558cd6087acb8e12a00f56ab3c64d65aa0af1195da7c9f8c0",
+    "extraction": "requirements file"
+  },
+  "megatron-core.in": {
+    "repository": "https://github.com/NVIDIA/Megatron-LM",
+    "commit": "a845aa7e12b3a117e24c2352b9e3e60bad2e3a17",
+    "path": "megatron/core/requirements.txt",
+    "source_sha256": "74d7db1da483c1ca8f007a86f77ec3ff32383914aea6cc426fea8adc454a0ee2",
+    "extraction": "requirements file"
+  },
+  "vllm.in": {
+    "repository": "https://github.com/vllm-project/vllm",
+    "commit": "a97dacb7106ee49f39f3d1fc6ae1800ff724e01d",
+    "path": "requirements/common.txt",
+    "source_sha256": "74a932cfe0469864247509838b68484bb6e6b978cb87df7ccebf75112e289e9d",
+    "extraction": "requirements file"
+  },
+  "vllm-ascend.in": {
+    "repository": "https://github.com/GDzhu01/vllm-ascend",
+    "commit": "e67ab649500fcb21fd2139da17d0e566f7364301",
+    "path": "requirements.txt",
+    "source_sha256": "31c69cf53a4fb5ecddc731e79090d35bb47e7163ce85b9fa4e6ad0bbf14e301c",
+    "extraction": "requirements file"
+  }
+}

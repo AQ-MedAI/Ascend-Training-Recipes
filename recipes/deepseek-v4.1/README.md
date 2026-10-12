@@ -10,28 +10,31 @@
 
 默认值描述的是配置，不表示对应规模已经验收。多节点脚本与单机脚本并非同一配置的别名。
 
-## 外部依赖
+## 环境与源码
 
-需要额外准备兼容的框架、V4.1 runtime 和原生算子；完整依赖包的独立发布尚未完成，见 [依赖说明](../../docs/DEPENDENCIES.md)。除框架目录外，以下内容仍来自该依赖仓库，未复制进本 recipe：
+使用 [V4.1 框架镜像](../../docker/v41/README.md)，在各 Ray 节点的同一路径执行：
 
-- `workspace/rollout/dsv41/`：固定 rollout 源码、runtime 和隔离 Python 环境。
-- `workspace/tests/dsv41/native_operator_env.sh`：多节点入口按所选 backend 加载的算子环境。
-- `workspace/rollout/dsv41/build-src/`：原生算子、Premix 等实际构建产物。
+```bash
+bash tools/setup_sources.sh v41
+bash tools/setup_environment.sh v41
+source tools/activate.sh v41
+```
 
-复制后的两个启动脚本使用 `ROOT=${WORK_DIR:-${DEPENDENCY_ROOT}}`，不再从 recipe 所在位置推导依赖根目录。`DEPENDENCY_ROOT` 指向完整依赖仓库；如果覆盖 `WORK_DIR`，该路径也必须包含上述 workspace 内容。
+Megatron-LM、vLLM/vLLM-Ascend、rollout Python 和编译算子位于镜像的 `/opt/ascend-training`；四个 fork 和配套 runtime 位于 recipe。`DEPENDENCY_ROOT` 指镜像环境，`WORK_DIR` 是运行目录（默认 recipe 根目录）。不再要求原开发依赖仓库。完整镜像尚待依赖锁定和 NPU 验收。
 
 ## 单机运行示例
 
 在已准备的 NPU 环境和 Ray 配置下，从本仓库根目录执行。以下 `/path/to/` 都需替换成真实的共享路径。
 
 ```bash
-export DEPENDENCY_ROOT=/path/to/dsv4_flash_npu_dependency
+source tools/activate.sh v41
 export MODEL=/path/to/prepared-v41-model
 export TRAIN_FILES=/path/to/train.parquet
 export VAL_FILES=/path/to/valid.parquet
 export REWARD_FN_PATH=/path/to/reward.py
 export REPORT_DIR=/path/to/new-report-directory
-export ROLLOUT_PYTHON="$DEPENDENCY_ROOT/workspace/rollout/dsv41/.venv/bin/python"
+export PYTHON_BIN="${PYTHON_BIN:-python3}"
+export ROLLOUT_PYTHON="$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')"
 bash recipes/deepseek-v4.1/dsv41_flash_main_ppo_16npu.sh
 ```
 
@@ -49,4 +52,4 @@ Engram hash 随 MindSpeed-LLM 的 V4.1 模型源码提供：`mindspeed_llm/tasks
 
 ### 默认框架目录
 
-先按[主 README](../../README.md#拉取源码)运行 `tools/setup_sources.sh` 初始化四个子模块。两个 V4.1 启动脚本默认从仓库的 `third_party/` 加载四个 fork；`DEPENDENCY_ROOT` 用于其余外部依赖，四个框架路径可分别通过 `*_ROOT` 覆盖。MindSpeed-LLM 已固定包含 Engram 的提交，详见[依赖说明](../../docs/DEPENDENCIES.md#子模块与版本更新)。
+先按[主 README](../../README.md#拉取源码)运行 `tools/setup_sources.sh` 初始化四个子模块。两个 V4.1 启动脚本默认从仓库的 `third_party/` 加载四个 fork；`DEPENDENCY_ROOT` 用于镜像中的框架和算子，四个框架路径可分别通过 `*_ROOT` 覆盖。MindSpeed-LLM 已固定包含 Engram 的提交，详见[依赖说明](../../docs/DEPENDENCIES.md#子模块与版本更新)。

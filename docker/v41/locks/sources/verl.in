@@ -1,0 +1,19 @@
+# Dependency declarations from https://github.com/AQ-MedAI/verl @ c73f779e4d6ebbf6172c3b020e47b3fd2f346d52
+accelerate
+codetiming
+datasets
+dill
+hydra-core
+numpy<2.0.0
+pandas
+peft
+pyarrow>=19.0.0
+pybind11
+pylatexenc
+ray[default]>=2.41.0
+torchdata
+tensordict>=0.8.0,<=0.10.0,!=0.9.0
+transformers
+wandb
+packaging>=20.0
+tensorboard

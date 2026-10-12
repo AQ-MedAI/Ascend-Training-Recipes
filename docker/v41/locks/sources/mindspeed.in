@@ -1,0 +1,19 @@
+# Dependency declarations from https://github.com/AQ-MedAI/MindSpeed @ 28c2945cbbafadbb1888eb5bef53195e06ddf44c
+pybind11
+ninja
+wheel
+numpy<=1.26.0
+six
+regex
+psutil
+pyyaml
+protobuf
+einops
+scipy
+sentencepiece
+pytest
+pytest-mock
+transformers>=4.43.2
+pandas
+scikit-learn
+SQLAlchemy

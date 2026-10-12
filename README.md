@@ -19,14 +19,14 @@ DeepSeek V4、V4.1 与 Kimi K2.6 在 Ascend NPU 上的 GRPO、OPD 和 MOPD 训�
 ```bash
 git clone https://github.com/AQ-MedAI/Ascend-Training-Recipes.git
 cd Ascend-Training-Recipes
-bash tools/setup_sources.sh
+bash tools/setup_sources.sh v41
 ```
 
 已有 clone 或更新 recipe 后执行：
 
 ```bash
 git pull --ff-only
-bash tools/setup_sources.sh
+bash tools/setup_sources.sh v41
 ```
 
 四个 fork 位于 `third_party/{MindSpeed,MindSpeed-LLM,mbridge,verl}`，按 recipe 记录的提交检出，不跟随分支最新版本。有未提交改动时，初始化脚本会停止更新。V4.1 启动脚本默认使用这些目录，也可分别设置 `MINDSPEED_ROOT`、`MINDSPEED_LLM_ROOT`、`MBRIDGE_ROOT`、`VERL_ROOT` 使用其他 checkout。
@@ -34,6 +34,10 @@ bash tools/setup_sources.sh
 Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --recurse-submodules`，但它还会下载框架内嵌的上游子模块（包括 GitCode 仓库）；这些依赖的版本不代表已通过本 recipe 验证。推荐上述初始化脚本，只拉取四个已登记的 fork。
 
 各模型的仓库和固定提交记录在 [dependencies/registry.json](dependencies/registry.json)，它不是完整环境 lockfile。默认源码组合面向 V4.1。V4、K2.6 的版本差异见[依赖说明](docs/DEPENDENCIES.md)；克隆源码不会安装软件包、编译算子或下载模型。
+
+镜像中完成源码初始化后，执行 `bash tools/setup_environment.sh v41` 和 `source tools/activate.sh v41`。V4 可以选择 `setup_sources.sh v4`，其完整镜像组合仍待验证。
+
+公开镜像候选构建文件与待补齐材料见 [V4.1 镜像说明](docker/v41/README.md)。当前尚未完成镜像构建和 NPU 验收。
 
 ## 使用前准备
 
@@ -48,7 +52,8 @@ recipes/       # 模型配置、启动与诊断脚本
 dependencies/  # registry.json：各模型的依赖版本登记
 third_party/   # 四个 fork 的 Git 子模块（默认 V4.1 基线）
 docs/          # 依赖、验证与来源说明
-tools/         # CPU 数值与启动参数检查
+tools/         # 源码/环境初始化、CPU 与启动参数检查
+workspace/     # 与固定 verl 入口兼容的 V4.1 Python runtime
 licenses/      # 第三方许可证
 ```
 

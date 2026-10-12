@@ -1,0 +1,13 @@
+# Dependency declarations from https://github.com/AQ-MedAI/MindSpeed-LLM @ 9e2327037ffe651c72ef8f5807751d022805227d
+numpy
+transformers==5.2.0
+scipy
+sentencepiece
+einops
+datasets
+pyarrow<=24.0.0
+pybind11
+peft
+tiktoken
+ray
+mistral_common
