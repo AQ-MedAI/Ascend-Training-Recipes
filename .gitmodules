@@ -1,0 +1,12 @@
+[submodule "MindSpeed"]
+	path = third_party/MindSpeed
+	url = https://github.com/AQ-MedAI/MindSpeed.git
+[submodule "MindSpeed-LLM"]
+	path = third_party/MindSpeed-LLM
+	url = https://github.com/AQ-MedAI/MindSpeed-LLM.git
+[submodule "mbridge"]
+	path = third_party/mbridge
+	url = https://github.com/AQ-MedAI/mbridge.git
+[submodule "verl"]
+	path = third_party/verl
+	url = https://github.com/AQ-MedAI/verl.git

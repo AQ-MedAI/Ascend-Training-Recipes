@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | v41 | [MindSpeed](https://github.com/AQ-MedAI/MindSpeed) | `aq/v41-integration` | `28c2945cbbafadbb1888eb5bef53195e06ddf44c` |
 | v4 | [MindSpeed](https://github.com/AQ-MedAI/MindSpeed) | `aq/v4-integration` | `dcfc6c22b04a4c966d05e128421959f60e0e80c2` |
-| v41 | [MindSpeed-LLM](https://github.com/AQ-MedAI/MindSpeed-LLM) | `aq/v41-integration` | `7ffccdc3fdea5f8eb25b5ce88aa0d45f9faa5042` |
+| v41 | [MindSpeed-LLM](https://github.com/AQ-MedAI/MindSpeed-LLM) | `aq/v41-integration` | `9e2327037ffe651c72ef8f5807751d022805227d` |
 | v4 | [MindSpeed-LLM](https://github.com/AQ-MedAI/MindSpeed-LLM) | `aq/v41-integration` | `7ffccdc3fdea5f8eb25b5ce88aa0d45f9faa5042` |
 | v41 | [mbridge](https://github.com/AQ-MedAI/mbridge) | `aq/v41-integration` | `7b0035f9e9b9aea540f0fb39861468a9cf6ff9e8` |
 | v4 | [mbridge](https://github.com/AQ-MedAI/mbridge) | `aq/v41-integration` | `7b0035f9e9b9aea540f0fb39861468a9cf6ff9e8` |
@@ -16,16 +16,26 @@
 
 复现实验应固定 commit，而非跟随分支最新版本。机器可读版本见 [registry.json](../dependencies/registry.json)。
 
+## 子模块与版本更新
+
+`third_party/` 中的四个 Git 子模块默认记录 V4.1 基线。`.gitmodules` 保存公开仓库地址，Git 子模块引用保存实际提交；`registry.json` 记录各模型的兼容组合。不要使用 `git submodule update --remote` 复现实验，它会跟随远端分支而绕过记录的版本。
+
+V4.1 的 MindSpeed-LLM 子模块固定为 `9e2327037ffe651c72ef8f5807751d022805227d`，包含随附的 `engram_hash.py`。V4 保持表中的原有提交。拉齐四个框架后仍须准备下文的运行时和原生算子。
+
+维护者更新依赖时，先将框架改动提交并推送到对应 fork，再在子模块中检出该提交、同步 registry 和本页的固定版本，最后在 recipe 仓库提交 `git add third_party/<仓库名>` 记录的引用。`.gitmodules` 与四个子模块引用必须随 recipe 一同提交，其他人初始化源码时才会得到正确版本。
+
+V4 使用本页的 V4 提交组合，并通过各脚本支持的路径配置指向对应 checkout。K2.6 仍有未固定组件，不使用默认 V4.1 组合替代。现有平级开发目录可继续保留；子模块是面向使用者的源码获取入口。
+
 ## V4 与 V4.1
 
-MindSpeed-LLM、mbridge 共用版本。MindSpeed 与 verl 分开固定：V4.1 使用新的 Megatron rank-owned optimizer 接口和 swap checkpoint 格式，需要与匹配的 Megatron-LM 同时部署；不能仅替换其中一个包。
+mbridge 共用版本；V4.1 的 MindSpeed-LLM 在 V4 基线上增加随附 Engram hash。MindSpeed 与 verl 分开固定：V4.1 使用新的 Megatron rank-owned optimizer 接口和 swap checkpoint 格式，需要与匹配的 Megatron-LM 同时部署；不能仅替换其中一个包。
 
 V4.1 rollout 源码：
 
 - [vLLM](https://github.com/vllm-project/vllm)：`a97dacb7106ee49f39f3d1fc6ae1800ff724e01d`。
 - [vLLM-Ascend](https://github.com/GDzhu01/vllm-ascend)：`e67ab649500fcb21fd2139da17d0e566f7364301`。
 
-仅安装这两个包不足以运行 V4.1；还需权重同步 runtime、Engram 实现、原生算子及其构建环境。这些组件的独立分发和安装方式尚未齐备。V4 rollout 的完整源码/补丁发布也待补齐。
+仅安装这两个包不足以运行 V4.1；还需权重同步 runtime、原生算子及其构建环境。Engram hash 实现由 MindSpeed-LLM 的 V4.1 模型目录提供。这些组件的独立分发和安装方式尚未齐备。V4 rollout 的完整源码/补丁发布也待补齐。
 
 ## K2.6
 

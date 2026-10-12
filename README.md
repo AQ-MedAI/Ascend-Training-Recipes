@@ -12,6 +12,29 @@ DeepSeek V4、V4.1 与 Kimi K2.6 在 Ascend NPU 上的 GRPO、OPD 和 MOPD 训�
 | DeepSeek V4.1 Flash | 多节点 RL、单机验证配置 | [V4.1](recipes/deepseek-v4.1/README.md) |
 | Kimi K2.6 | GRPO、OPD、双教师 MOPD、教师共享 | [K2.6](recipes/kimi-k2.6/README.md) |
 
+## 拉取源码
+
+新环境克隆 recipe 后，运行源码初始化脚本即可自动拉齐 AQ-MedAI 的四个 fork：
+
+```bash
+git clone https://github.com/AQ-MedAI/Ascend-Training-Recipes.git
+cd Ascend-Training-Recipes
+bash tools/setup_sources.sh
+```
+
+已有 clone 或更新 recipe 后执行：
+
+```bash
+git pull --ff-only
+bash tools/setup_sources.sh
+```
+
+四个 fork 位于 `third_party/{MindSpeed,MindSpeed-LLM,mbridge,verl}`，按 recipe 记录的提交检出，不跟随分支最新版本。有未提交改动时，初始化脚本会停止更新。V4.1 启动脚本默认使用这些目录，也可分别设置 `MINDSPEED_ROOT`、`MINDSPEED_LLM_ROOT`、`MBRIDGE_ROOT`、`VERL_ROOT` 使用其他 checkout。
+
+Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --recurse-submodules`，但它还会下载框架内嵌的上游子模块（包括 GitCode 仓库）；这些依赖的版本不代表已通过本 recipe 验证。推荐上述初始化脚本，只拉取四个已登记的 fork。
+
+默认源码组合面向 V4.1。V4、K2.6 的版本差异见[依赖说明](docs/DEPENDENCIES.md)；克隆源码不会安装软件包、编译算子或下载模型。
+
 ## 使用前准备
 
 1. 查看 [依赖版本与缺失组件](docs/DEPENDENCIES.md)，准备匹配的 Ascend 软件环境与框架。
@@ -23,6 +46,7 @@ DeepSeek V4、V4.1 与 Kimi K2.6 在 Ascend NPU 上的 GRPO、OPD 和 MOPD 训�
 ```text
 recipes/       # 模型配置、启动与诊断脚本
 dependencies/  # 框架仓库和固定提交
+third_party/   # 四个 fork 的 Git 子模块（默认 V4.1 基线）
 docs/          # 依赖、验证与来源说明
 tools/         # CPU 数值与启动参数检查
 licenses/      # 第三方许可证

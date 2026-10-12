@@ -7,13 +7,14 @@ if (( $# != 0 )); then
     exit 2
 fi
 
-# Keep these defaults aligned with dsv4_flash_mopd_16npu_cutlayer.sh.
+# Fork sources default to the pinned submodules; external runtimes use DEPENDENCY_ROOT.
+RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPENDENCY_ROOT="${DEPENDENCY_ROOT:-/path/to/dsv4_flash_npu_dependency}"
-VERL_ROOT="${VERL_ROOT:-${DEPENDENCY_ROOT}/verl}"
+VERL_ROOT="${VERL_ROOT:-${RECIPE_ROOT}/third_party/verl}"
 MEGATRON_ROOT="${MEGATRON_ROOT:-${DEPENDENCY_ROOT}/Megatron-LM}"
-MINDSPEED_ROOT="${MINDSPEED_ROOT:-${DEPENDENCY_ROOT}/MindSpeed}"
-MINDSPEED_LLM_ROOT="${MINDSPEED_LLM_ROOT:-${DEPENDENCY_ROOT}/MindSpeed-LLM}"
-MBRIDGE_ROOT="${MBRIDGE_ROOT:-${DEPENDENCY_ROOT}/mbridge}"
+MINDSPEED_ROOT="${MINDSPEED_ROOT:-${RECIPE_ROOT}/third_party/MindSpeed}"
+MINDSPEED_LLM_ROOT="${MINDSPEED_LLM_ROOT:-${RECIPE_ROOT}/third_party/MindSpeed-LLM}"
+MBRIDGE_ROOT="${MBRIDGE_ROOT:-${RECIPE_ROOT}/third_party/mbridge}"
 VLLM_ROOT="${VLLM_ROOT:-${DEPENDENCY_ROOT}/vllm}"
 VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-${DEPENDENCY_ROOT}/vllm-ascend}"
 
@@ -90,8 +91,9 @@ export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
 # ------------------------- Paths -------------------------
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 ROOT="${WORK_DIR:-${DEPENDENCY_ROOT}}"
-if [[ ! -f "$ROOT/workspace/inference/engram.py" ]]; then
-    printf 'Missing V4.1 runtime: %s/workspace/inference/engram.py; set DEPENDENCY_ROOT (or WORK_DIR) to the prepared dependency repository.\n' "$ROOT" >&2
+ENGRAM_HASH_SOURCE="${ENGRAM_HASH_SOURCE:-${MINDSPEED_LLM_ROOT}/mindspeed_llm/tasks/models/transformer/deepseek41/engram_hash.py}"
+if [[ ! -f "$ENGRAM_HASH_SOURCE" ]]; then
+    printf 'Missing Engram hash implementation: %s; use a MindSpeed-LLM checkout with V4.1 Engram support, or set ENGRAM_HASH_SOURCE.\n' "$ENGRAM_HASH_SOURCE" >&2
     exit 1
 fi
 cd "$ROOT"
@@ -242,7 +244,7 @@ ACTOR_CONFIG=(
     ++actor_rollout_ref.actor.mindspeed.llm_kwargs.v41_engram_crop="$ENGRAM_CROP"
     ++actor_rollout_ref.actor.mindspeed.llm_kwargs.v41_engram_table_trainable="$ENGRAM_TABLE_TRAINABLE"
     ++actor_rollout_ref.actor.mindspeed.llm_kwargs.v41_engram_source="$ENGRAM_SOURCE"
-    ++actor_rollout_ref.actor.mindspeed.llm_kwargs.v41_engram_hash_source="$ROOT/workspace/inference/engram.py"
+    ++actor_rollout_ref.actor.mindspeed.llm_kwargs.v41_engram_hash_source="$ENGRAM_HASH_SOURCE"
     ++actor_rollout_ref.actor.mindspeed.llm_kwargs.swap_optimizer=True
     ++actor_rollout_ref.actor.mindspeed.llm_kwargs.swap_optimizer_times=64
     ++actor_rollout_ref.actor.mindspeed.llm_kwargs.recompute_granularity=full
