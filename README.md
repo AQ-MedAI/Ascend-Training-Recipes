@@ -33,7 +33,7 @@ bash tools/setup_sources.sh
 
 Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --recurse-submodules`，但它还会下载框架内嵌的上游子模块（包括 GitCode 仓库）；这些依赖的版本不代表已通过本 recipe 验证。推荐上述初始化脚本，只拉取四个已登记的 fork。
 
-默认源码组合面向 V4.1。V4、K2.6 的版本差异见[依赖说明](docs/DEPENDENCIES.md)；克隆源码不会安装软件包、编译算子或下载模型。
+各模型的仓库和固定提交记录在 [dependencies/registry.json](dependencies/registry.json)，它不是完整环境 lockfile。默认源码组合面向 V4.1。V4、K2.6 的版本差异见[依赖说明](docs/DEPENDENCIES.md)；克隆源码不会安装软件包、编译算子或下载模型。
 
 ## 使用前准备
 
@@ -45,7 +45,7 @@ Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --r
 
 ```text
 recipes/       # 模型配置、启动与诊断脚本
-dependencies/  # 框架仓库和固定提交
+dependencies/  # registry.json：各模型的依赖版本登记
 third_party/   # 四个 fork 的 Git 子模块（默认 V4.1 基线）
 docs/          # 依赖、验证与来源说明
 tools/         # CPU 数值与启动参数检查

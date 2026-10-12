@@ -18,6 +18,8 @@
 
 ## 子模块与版本更新
 
+框架代码在各自 fork 中维护，格式化使用对应框架自己的配置。
+
 `third_party/` 中的四个 Git 子模块默认记录 V4.1 基线。`.gitmodules` 保存公开仓库地址，Git 子模块引用保存实际提交；`registry.json` 记录各模型的兼容组合。不要使用 `git submodule update --remote` 复现实验，它会跟随远端分支而绕过记录的版本。
 
 V4.1 的 MindSpeed-LLM 子模块固定为 `9e2327037ffe651c72ef8f5807751d022805227d`，包含随附的 `engram_hash.py`。V4 保持表中的原有提交。拉齐四个框架后仍须准备下文的运行时和原生算子。

@@ -1,6 +1,6 @@
 # 来源与第三方声明
 
-- DeepSeek V4 recipe 参考 [verl-ascend-recipe](https://github.com/verl-project/verl-ascend-recipe) 的训练和模型准备脚本。
+- DeepSeek V4 recipe 参考 [verl-ascend-recipe](https://github.com/verl-project/verl-ascend-recipe) 的训练和模型准备脚本；本仓库维护选定的脚本，verl-ascend-recipe 本身不是额外的 Python 运行时依赖。
 - Kimi K2.6 recipe 基于 [verl](https://github.com/verl-project/verl) 训练入口，由 AQ-MedAI 维护 RL/MOPD 配置。
 - DeepSeek V4.1 recipe 和配套集成配置由 AQ-MedAI 维护。
 
