@@ -24,5 +24,7 @@ if [[ "$_recipe_profile" == v41 ]]; then
     export ROLLOUT_PYTHON="${ROLLOUT_PYTHON:-$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')}"
     export V41_CONFIG_SOURCE="$VLLM_ASCEND_ROOT/vllm_ascend/deepseek_v41_config.py"
     export V41_NATIVE_OPERATOR_ENV="$RECIPE_ROOT/tools/native_operator_env.sh"
+else
+    source "$RECIPE_ROOT/tools/v4_environment.sh"
 fi
 unset _recipe_profile

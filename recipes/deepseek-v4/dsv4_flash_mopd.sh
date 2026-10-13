@@ -17,7 +17,7 @@ if (( $# != 0 )); then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_BIN=python3
+export PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 TRANSFER_QUEUE_VERSION="$(
     "${PYTHON_BIN}" -c \
@@ -30,14 +30,14 @@ if [[ "${TRANSFER_QUEUE_VERSION}" != "0.1.7" ]]; then
 fi
 
 # Formal data/model/output paths.
-export PROJECT_NAME=DeepSeek-V4-Flash-MOPD
-export EXP_NAME=DeepSeek-V4-Flash-MOPD-8N-student-4N-teacher-full-vocab
-export MODEL_PATH=/path/to/deepseek-v4-flash-0731-bf16
-export TRAIN_FILES=/path/to/k26_rl_train.parquet
-export VAL_FILES=/path/to/k26_rl_valid.parquet
-export REWARD_FN_PATH=/path/to/k26_rl_reward.py
-export OUTPUT_DIR=/path/to/dsv4_flash_save_run_hpu
-export LOG_DIR=/path/to/log
+export PROJECT_NAME="${PROJECT_NAME:-DeepSeek-V4-Flash-MOPD}"
+export EXP_NAME="${EXP_NAME:-DeepSeek-V4-Flash-MOPD-8N-student-4N-teacher-full-vocab}"
+export MODEL_PATH="${MODEL_PATH:-/path/to/deepseek-v4-flash-0731-bf16}"
+export TRAIN_FILES="${TRAIN_FILES:-/path/to/mopd_train.parquet}"
+export VAL_FILES="${VAL_FILES:-/path/to/mopd_valid.parquet}"
+export REWARD_FN_PATH="${REWARD_FN_PATH:-/path/to/mopd_reward.py}"
+export OUTPUT_DIR="${OUTPUT_DIR:-/path/to/dsv4_flash_save_run_hpu}"
+export LOG_DIR="${LOG_DIR:-/path/to/log}"
 
 # Student pool: exactly 8 nodes x 16 NPUs.  These are the known-good full RL
 # settings; do not let inherited environment variables change the topology.
@@ -164,5 +164,4 @@ exec bash "${SCRIPT_DIR}/dsv4_flash_verl.sh" \
     +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.kv_cache_dtype=auto \
     "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_TEACHER_DEDICATED_RACK='1'" \
     "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_MOPD_DEBUG='0'" \
-    "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_FULL_VOCAB_EXPERIMENT_NAME='${VERL_FULL_VOCAB_EXPERIMENT_NAME}'" \
-    "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
+    "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_FULL_VOCAB_EXPERIMENT_NAME='${VERL_FULL_VOCAB_EXPERIMENT_NAME}'"

@@ -3,9 +3,8 @@
 
 set -euo pipefail
 
-DEPENDENCY_ROOT="${DEPENDENCY_ROOT:-/path/to/dsv4_flash_npu_dependency}"
-VLLM_ROOT="${VLLM_ROOT:-${DEPENDENCY_ROOT}/vllm}"
-VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-${DEPENDENCY_ROOT}/vllm-ascend}"
+RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$RECIPE_ROOT/tools/v4_environment.sh"
 MODEL_PATH="${MODEL_PATH:-${TMPDIR:-/tmp}/dsv4_flash_bf16_4layers_model}"
 PROMPT_LENGTH="${PROMPT_LENGTH:-128}"
 PROMPT_TOKEN_IDS_FILE="${PROMPT_TOKEN_IDS_FILE:-}"

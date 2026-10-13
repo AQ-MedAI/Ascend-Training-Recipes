@@ -31,10 +31,9 @@ warnings.filterwarnings(
 )
 PY
 
-MBRIDGE_ROOT="${MBRIDGE_ROOT:-/path/to/mbridge}"
+RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$RECIPE_ROOT/tools/v4_environment.sh"
 MBRIDGE_OVERLAY="${TMPDIR:-/tmp}/mbridge_overlay"
-VLLM_ROOT="${VLLM_ROOT:-/path/to/vllm}"
-VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-/path/to/vllm-ascend}"
 
 if [[ -d "${MBRIDGE_ROOT}/mbridge" ]]; then
     rm -rf "${MBRIDGE_OVERLAY}"
@@ -68,7 +67,7 @@ export TRANSFORMERS_VERBOSITY="${TRANSFORMERS_VERBOSITY:-error}"
 export PYTHONWARNINGS="${PYTHONWARNINGS:-ignore:.*Accessing `.*` from `\\.models\\..*image_processing_pil_.*`:Warning}"
 
 # ------------------------- Paths -------------------------
-# Keep local data/model/code paths from the existing DSV4 flash script.
+# Model, data and output paths can be supplied through environment variables.
 PROJECT_NAME="${PROJECT_NAME:-DeepSeek-V4-Flash}"
 EXP_NAME="${EXP_NAME:-DeepSeek-V4-Flash-8-nodes}"
 MODEL_PATH="${MODEL_PATH:-/path/to/deepseek-v4-flash-0731-bf16}"
@@ -407,6 +406,21 @@ EXTRA_CONFIG=(
     +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'0'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ASCEND_ENABLE_FLASHCOMM1="'${VLLM_ASCEND_ENABLE_FLASHCOMM1}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH="'${PYTHONPATH}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.RECIPE_ROOT="'${RECIPE_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.DEPENDENCY_ROOT="'${DEPENDENCY_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_ROOT="'${MINDSPEED_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_LLM_ROOT="'${MINDSPEED_LLM_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MBRIDGE_ROOT="'${MBRIDGE_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT="'${MEGATRON_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ROOT="'${VLLM_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ASCEND_ROOT="'${VLLM_ASCEND_ROOT:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_HOME_PATH="'${ASCEND_HOME_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_OPP_PATH="'${ASCEND_OPP_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_AICPU_PATH="'${ASCEND_AICPU_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ATB_HOME_PATH="'${ATB_HOME_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY="'error'"
     +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_NPU_SOCKET_PORT_RANGE="'${HCCL_NPU_SOCKET_PORT_RANGE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_HOST_SOCKET_PORT_RANGE="'${HCCL_HOST_SOCKET_PORT_RANGE}'"
