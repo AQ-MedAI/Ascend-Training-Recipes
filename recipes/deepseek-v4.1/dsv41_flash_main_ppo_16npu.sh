@@ -102,9 +102,9 @@ cd "$ROOT"
 export PYTHONPATH="$ROOT:${PYTHONPATH}"
 REPORT_DIR="${REPORT_DIR:-$ROOT/workspace/reports/main-ppo-$(date +%Y%m%d-%H%M%S)}"
 LOG_FILE="${LOG_FILE:-$REPORT_DIR/launch.log}"
-TRAIN_FILES="${TRAIN_FILES:-/path/to/k26_rl_train.parquet}"
-VAL_FILES="${VAL_FILES:-/path/to/k26_rl_valid.parquet}"
-REWARD_FN_PATH="${REWARD_FN_PATH:-/path/to/k26_rl_reward.py}"
+TRAIN_FILES="${TRAIN_FILES:-/path/to/rl_train.parquet}"
+VAL_FILES="${VAL_FILES:-/path/to/rl_valid.parquet}"
+REWARD_FN_PATH="${REWARD_FN_PATH:-/path/to/rl_reward.py}"
 MODEL="${MODEL:-/path/to/dsv41-smoke-40L-16E-BF16}"
 if [[ -z "${ENGRAM_CROP+x}" ]]; then
     ENGRAM_CROP=""
@@ -123,6 +123,8 @@ else
     export ENGRAM_SOURCE="${ENGRAM_SOURCE:-$MODEL}"
 fi
 export ROLLOUT_PYTHON="${ROLLOUT_PYTHON:-$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')}"
+# Configure QLI/CSA2 before Python starts and Ray captures the environment.
+source "${V41_NATIVE_OPERATOR_ENV:-$RECIPE_ROOT/tools/native_operator_env.sh}"
 export V41_NATIVE_TRAINER=1
 if [[ -n "$ENGRAM_CROP" ]]; then
     ROLLOUT_TP="${ROLLOUT_TP:-8}"
@@ -316,6 +318,9 @@ EXTRA_CONFIG=(
     +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'${P2P_HCCL_BUFFSIZE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VLLM_ASCEND_ENABLE_FLASHCOMM1="'${VLLM_ASCEND_ENABLE_FLASHCOMM1}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH="'${PYTHONPATH}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.V41_CSA2_NATIVE_LIBRARY="'${V41_CSA2_NATIVE_LIBRARY}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.DEPENDENCY_ROOT="'${DEPENDENCY_ROOT}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_LLM_ROOT="'${MINDSPEED_LLM_ROOT}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.MBRIDGE_ROOT="'${MBRIDGE_ROOT}'"
