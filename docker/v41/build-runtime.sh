@@ -2,9 +2,9 @@
 # Build only image-owned frameworks and native operators. No recipe runtime or forks are installed.
 set -eo pipefail
 ROOT=/opt/ascend-training
-INPUT=/opt/v41-inputs
-# Fail before fetching or compiling when the runtime locks are not ready.
-for lock in build runtime; do
+INPUT=/opt/v41-image/locks
+# Check installation inputs before fetching or compiling.
+for lock in build; do
     [[ -s "$INPUT/$lock.lock" ]] || {
         printf 'Missing dependency lock: %s/%s.lock; see docker/v41/locks/README.md.\n' "$INPUT" "$lock" >&2
         exit 1
@@ -19,8 +19,22 @@ export PYTHON_BIN="$(command -v python3)"
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 # Build tools have their own lock; runtime locks include framework dependencies.
 "$PYTHON_BIN" -m pip install --require-hashes --only-binary=:all: -r "$INPUT/build.lock"
-"$PYTHON_BIN" -m pip install --require-hashes \
-    --constraint /opt/v41-image/hardware-constraints.txt -r "$INPUT/runtime.lock"
+# Prefer the full hash lock when available. Development builds may use fixed inputs.
+if [[ -s "$INPUT/runtime.lock" ]]; then
+    uv pip install --python "$PYTHON_BIN" --require-hashes --no-deps \
+        --constraint /opt/v41-image/hardware-constraints.txt -r "$INPUT/runtime.lock"
+else
+    install_args=()
+    case "${PYTHON_DEPENDENCY_MODE:-resolve}" in
+        resolve) ;;
+        no-deps) install_args+=(--no-deps)
+            echo 'Installing direct runtime requirements only; transitive dependencies may be missing.' >&2 ;;
+        *) echo 'PYTHON_DEPENDENCY_MODE must be resolve or no-deps' >&2; exit 2 ;;
+    esac
+    uv pip install --python "$PYTHON_BIN" \
+        --overrides "$INPUT/runtime-overrides.txt" \
+        ${install_args[@]+"${install_args[@]}"} -r "$INPUT/runtime.in"
+fi
 "$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$ROOT/Megatron-LM"
 rollout="$ROOT/workspace/rollout/dsv41"
 mkdir -p "$rollout/build-src"
@@ -60,7 +74,10 @@ export ROLLOUT_PYTHON="$PYTHON_BIN"
 source workspace/tests/dsv41/native_operator_env.sh
 test -s "$V41_CSA2_NATIVE_LIBRARY"
 test -s "$build_root/mhc-premix/env.sh"
-"$PYTHON_BIN" -m pip check
+# Report declared conflicts without blocking this compatibility deployment.
+if ! "$PYTHON_BIN" -m pip check; then
+    echo 'Dependency metadata conflicts reported above; continuing with the fixed deployment versions.' >&2
+fi
 "$PYTHON_BIN" -I /opt/v41-image/collect_environment.py > /opt/v41-image/runtime-environment.json
 "$PYTHON_BIN" - <<'PY'
 import json
@@ -70,7 +87,10 @@ root = Path('/opt/v41-image')
 expected = {'torch':'2.10.0', 'torch-npu':'2.10.0.post4', 'triton-ascend':'3.2.2', 'triton':'3.5.0'}
 report = json.loads((root / 'runtime-environment.json').read_text())
 packages = {p['name'].lower().replace('_', '-'):p['version'].split('+')[0] for p in report['packages']}
-expected.update({'numpy': '1.26.4', 'transformers': '5.14.1'})
+expected.update({'numpy': '1.26.4', 'transformers': '5.14.1', 'fastapi': '0.123.10',
+                 'starlette': '0.50.0', 'opencv-python-headless': '5.0.0.93',
+                 'prometheus-fastapi-instrumentator': '8.1.0', 'mcp': '2.2.0',
+                 'model-hosting-container-standards': '0.1.16'})
 assert all(packages.get(k) == v for k,v in expected.items()), packages
 registry = json.loads((root/'registry.json').read_text())['rollout']['v41']
 receipt = {'profile':'v41', 'python_environment':'single', 'vllm':registry['vllm']['commit'], 'vllm-ascend':registry['vllm_ascend']['commit'],

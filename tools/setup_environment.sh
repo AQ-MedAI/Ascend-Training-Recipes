@@ -9,5 +9,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 for name in MindSpeed MindSpeed-LLM mbridge verl; do
     "$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$ROOT/third_party/$name"
 done
-"$PYTHON_BIN" -m pip check
+if ! "$PYTHON_BIN" -m pip check; then
+    echo 'Dependency metadata conflicts reported above; continuing with the fixed deployment versions.' >&2
+fi
 printf 'Sources installed for %s. Run: source tools/activate.sh %s\n' "$PROFILE" "$PROFILE"

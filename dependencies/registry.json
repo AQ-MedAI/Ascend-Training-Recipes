@@ -7,7 +7,7 @@
       "profiles": {
         "v41": {
           "branch": "aq/v41-integration",
-          "commit": "28c2945cbbafadbb1888eb5bef53195e06ddf44c"
+          "commit": "0b2d2115f0e07f12633cef72449f6f83e05a0f21"
         },
         "v4": {
           "branch": "aq/v4-integration",
@@ -20,7 +20,7 @@
       "profiles": {
         "v41": {
           "branch": "aq/v41-integration",
-          "commit": "9e2327037ffe651c72ef8f5807751d022805227d",
+          "commit": "794171eace3cfa2c1cd13ade80d4232ccd5084b1",
           "required_files": [
             "mindspeed_llm/tasks/models/transformer/deepseek41/engram_hash.py"
           ],

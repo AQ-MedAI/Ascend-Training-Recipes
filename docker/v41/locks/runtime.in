@@ -1,4 +1,4 @@
-# Unified V4.1 training and rollout dependencies; source conflicts must be resolved.
+# Unified V4.1 dependencies, resolved with explicit runtime-overrides.txt.
 -c runtime-constraints.txt
 -r build.in
 -c build.lock
@@ -21,3 +21,12 @@ TransferQueue==0.1.7
 -r sources/vllm-ascend.in
 googleapis-common-protos
 ray[default]>=2.41.0
+
+# Fixed deployment components (exact versions in runtime-constraints.txt).
+fastapi
+starlette
+opencv-python-headless
+prometheus-fastapi-instrumentator
+mcp
+model-hosting-container-standards
+transformers

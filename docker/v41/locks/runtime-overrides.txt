@@ -1,0 +1,5 @@
+# Intentional dependency-declaration overrides, not ordinary constraints.
+# These versions reproduce the selected deployment; package METADATA is left unchanged.
+fastapi[standard]==0.123.10
+starlette==0.50.0
+numpy==1.26.4

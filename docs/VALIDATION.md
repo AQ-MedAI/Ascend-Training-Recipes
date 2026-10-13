@@ -29,4 +29,4 @@ python tools/check_launchers.py /tmp/launchers.json --mbridge-root ../mbridge
 
 候选目标为训练和 rollout 共用 Transformers 5.14.1、NumPy 1.26.4。静态路径检查不等于训练兼容性验收。发布前需在目标 NPU 上使用同一套模型、数据和种子，验证配置/tokenizer 加载、训练 forward/backward、optimizer step、权重同步后的 rollout 和保存恢复，并记录 loss、梯度及训练/rollout logprob 差异。
 
-当前完整 `docker/v41/locks/runtime.lock` 尚未生成，FastAPI 和 OpenCV/NumPy 的源码声明冲突仍需解决。镜像与 NPU 验收尚未完成。
+当前完整 `docker/v41/locks/runtime.lock` 尚未生成，FastAPI 和 OpenCV/NumPy 的已知声明差异按固定版本显式覆盖，pip check 结果保留为非阻断报告。完整运行锁不是开发镜像构建前置条件。镜像与 NPU 验收尚未完成。

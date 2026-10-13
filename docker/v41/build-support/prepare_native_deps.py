@@ -99,11 +99,17 @@ def prepare(root):
             src, dst = temp / directory, target / directory
             marker = dst / '.dsv41-offline-archives.json'
             receipt = target / ('.dsv41-' + directory + '-archives.json')
+            # A non-recursive Git checkout creates empty submodule placeholders.
+            # Reject links (including dangling links) before inspecting/removing a directory.
+            if dst.is_symlink():
+                raise ValueError(f'Dependency must not be a symlink: {dst}')
+            if receipt.exists() and receipt.read_text() != marker_text:
+                raise ValueError(f'Dependency receipt differs: {receipt}')
+            if dst.exists() and not dst.is_dir():
+                raise ValueError(f'Dependency must be a directory: {dst}')
+            if dst.is_dir() and not any(dst.iterdir()):
+                dst.rmdir()  # Only empty directories; never remove existing dependency contents.
             if dst.exists():
-                if dst.is_symlink():
-                    raise ValueError(f'Dependency must not be a symlink: {dst}')
-                if receipt.exists() and receipt.read_text() != marker_text:
-                    raise ValueError(f'Dependency receipt differs: {receipt}')
                 if not receipt.exists():
                     if marker.is_file() and marker.read_text() == marker_text:
                         pass  # Migrate original per-directory receipt.

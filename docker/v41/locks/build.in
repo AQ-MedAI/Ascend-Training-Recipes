@@ -2,9 +2,11 @@
 attrs==24.2.0
 cmake>=3.26.1,<4
 ninja
-packaging>=24.2
+# tensordict 0.10.0 -> pyvers<0.2 requires packaging>=25,<26.
+packaging==25.0
 setuptools>=77.0.3,<81
-setuptools-scm>=8
+# Newer setuptools-scm/vcs-versioning require packaging>=26.2.
+setuptools-scm==8.3.1
 setuptools-rust>=1.9
 wheel
 jinja2

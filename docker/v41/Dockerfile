@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# Use the bundled BuildKit Dockerfile frontend to avoid an extra Docker Hub pull.
 # Candidate only: required public inputs are documented in README.md.
 # CANN base from upstream verl Ascend Dockerfile; pin its digest for release.
 ARG BASE_IMAGE=swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12
@@ -49,6 +49,7 @@ ARG MEGATRON_COMMIT=a845aa7e12b3a117e24c2352b9e3e60bad2e3a17
 ARG SOC_VERSION=ascend910_9382
 ARG MAX_JOBS=4
 ARG DEPENDENCY_OFFLINE=0
+ARG PYTHON_DEPENDENCY_MODE=resolve
 ENV DEPENDENCY_ROOT=/opt/ascend-training \
     MEGATRON_ROOT=/opt/ascend-training/Megatron-LM \
     SOC_VERSION=${SOC_VERSION}
@@ -80,13 +81,15 @@ VERIFY_MEGATRON
 
 # Only image-owned sources are built here; recipe forks/runtime are installed after cloning.
 COPY dependencies/registry.json /opt/v41-image/registry.json
-# Full Python dependency locks are pending; no external runtime source payload is required.
-COPY docker/v41/locks/ /opt/v41-inputs/
+# A complete runtime lock is optional for development builds; fixed inputs are included.
+COPY docker/v41/locks/ /opt/v41-image/locks/
 COPY docker/v41/build-support/prepare_native_deps.py /opt/ascend-training/workspace/rollout/dsv41/
 COPY docker/v41/build-support/prepare_mhc_premix.py docker/v41/build-support/build_mhc_premix.sh docker/v41/build-support/native_operator_env.sh /opt/ascend-training/workspace/tests/dsv41/
 COPY docker/v41/build-runtime.sh docker/v41/collect_environment.py docker/v41/download_dependencies.py docker/v41/native-dependencies.json /opt/v41-image/
 RUN --mount=type=cache,target=/root/.cache/ascend-training-recipes \
-    MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" bash /opt/v41-image/build-runtime.sh
+    --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,target=/root/.cache/uv \
+    PIP_CACHE_DIR=/root/.cache/pip UV_CACHE_DIR=/root/.cache/uv MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" PYTHON_DEPENDENCY_MODE="${PYTHON_DEPENDENCY_MODE}" bash /opt/v41-image/build-runtime.sh
 
 # Training and rollout share Python dependencies; native loader settings remain role-specific.
 ENV VLLM_ROOT=/opt/ascend-training/workspace/rollout/dsv41/build-src/vllm \

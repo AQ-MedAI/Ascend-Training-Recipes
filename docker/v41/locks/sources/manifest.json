@@ -1,16 +1,16 @@
 {
   "mindspeed.in": {
     "repository": "https://github.com/AQ-MedAI/MindSpeed",
-    "commit": "28c2945cbbafadbb1888eb5bef53195e06ddf44c",
+    "commit": "0b2d2115f0e07f12633cef72449f6f83e05a0f21",
     "path": "requirements.txt",
-    "source_sha256": "1ce6572c462f4881e6bcfb15c31d131e7ef8d5c4dd0c33b899626d2655ac1a93",
+    "source_sha256": "dd4abca4fa3dae4b2d19bfad2e703ebd40e29448257a761da023d8ac1295681b",
     "extraction": "requirements file"
   },
   "mindspeed-llm.in": {
     "repository": "https://github.com/AQ-MedAI/MindSpeed-LLM",
-    "commit": "9e2327037ffe651c72ef8f5807751d022805227d",
+    "commit": "794171eace3cfa2c1cd13ade80d4232ccd5084b1",
     "path": "requirements.txt",
-    "source_sha256": "0f1827c534de51cd6c26b6ffcddba9e06340bdfcbb68a0201ac28fbe6c13f07e",
+    "source_sha256": "d8231d60c554d6f5ec59af2349ff45254f77f4285449f23b252b2da65725e0af",
     "extraction": "requirements file"
   },
   "verl.in": {

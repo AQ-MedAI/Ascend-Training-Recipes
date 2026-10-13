@@ -1,8 +1,8 @@
-# Dependency declarations from https://github.com/AQ-MedAI/MindSpeed @ 28c2945cbbafadbb1888eb5bef53195e06ddf44c
+# Dependency declarations from https://github.com/AQ-MedAI/MindSpeed @ 0b2d2115f0e07f12633cef72449f6f83e05a0f21
 pybind11
 ninja
 wheel
-numpy<=1.26.0
+numpy==1.26.4
 six
 regex
 psutil

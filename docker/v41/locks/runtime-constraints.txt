@@ -1,6 +1,9 @@
-# Unified candidate baseline. Requires source declaration reconciliation and NPU validation.
-transformers==5.14.1
-numpy==1.26.4
+# Fixed V4.1 deployment versions. See README.md for declared dependency differences.
 fastapi==0.123.10
 starlette==0.50.0
 opencv-python-headless==5.0.0.93
+numpy==1.26.4
+prometheus-fastapi-instrumentator==8.1.0
+mcp==2.2.0
+model-hosting-container-standards==0.1.16
+transformers==5.14.1

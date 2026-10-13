@@ -75,11 +75,13 @@ def acquire(entry, workspace, cache, offline):
     if checked_existing(target, sha):
         return 'existing'
     cached = cache / sha
+    status = 'cached'
     if not checked_existing(cached, sha):
         if offline:
             raise ValueError('Offline cache miss: ' + entry['path'])
         if not entry.get('url') and entry.get('transport') != 'git-blob':
             raise ValueError('No verified public archive URL: ' + entry['path'] + '; ' + entry['unresolved'])
+        status = 'downloaded'
         cache.mkdir(parents=True, exist_ok=True)
         for attempt in range(3):
             fd, name = tempfile.mkstemp(prefix='.download-', dir=cache)
@@ -117,7 +119,7 @@ def acquire(entry, workspace, cache, offline):
         os.replace(temp, target)
     finally:
         temp.unlink(missing_ok=True)
-    return 'ready'
+    return status
 
 
 def main():
