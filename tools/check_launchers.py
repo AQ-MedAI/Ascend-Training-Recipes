@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory(prefix="aq-launch-contract-") as td:
     fake.chmod(0o755)
     for model, script in [
         ("v4", r / "recipes/deepseek-v4/dsv4_flash_verl.sh"),
-        ("k26", r / "recipes/kimi-k2.6/kimi_k26_verl.sh"),
+        ("k26", r / "recipes/kimi-k2.6/kimi_k26_rl.sh"),
     ]:
         env = os.environ.copy()
         env.update(

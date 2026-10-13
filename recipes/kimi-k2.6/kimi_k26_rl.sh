@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Kimi-K2.6 GRPO training with verl + Megatron + vLLM.
-# Usage: override any variable before the command, e.g. ACTOR_TP=4 NNODES=8 bash scripts/kimi_k26_verl.sh
+# Usage: override any variable before the command, e.g. ACTOR_TP=4 NNODES=8 bash recipes/kimi-k2.6/kimi_k26_verl.sh
 
 set -xeuo pipefail
+
+RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+export VERL_ROOT="${VERL_ROOT:-$RECIPE_ROOT/third_party/verl}"
+export PYTHONPATH="$VERL_ROOT:${PYTHONPATH:-}"
 
 # ------------------------- Environment -------------------------
 # NPU/HCCL defaults. Override from the shell when cluster settings differ.
@@ -174,11 +178,17 @@ ACTOR=(
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_topk_scaling_factor=2.5
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_bias_update_rate=0.0
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_aux_loss_coeff=0.0
-    +actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_first_pipeline_stage=3
-    +actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_last_pipeline_stage=2
     +actor_rollout_ref.actor.megatron.override_transformer_config.attention_softmax_in_fp32=True
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_dtype=fp32
 )
+
+# Uneven pipeline splits apply only to the full-model pipeline profile.
+if (( ACTOR_PP > 1 )); then
+    ACTOR+=(
+        +actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_first_pipeline_stage="${FIRST_PIPELINE_LAYERS:-3}"
+        +actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_last_pipeline_stage="${LAST_PIPELINE_LAYERS:-2}"
+    )
+fi
 
 ROLLOUT=(
     actor_rollout_ref.rollout.name="${ROLLOUT_NAME}"
@@ -259,6 +269,10 @@ EXTRA=(
     +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE="'200'"
     +ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE="'200'"
     +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'0'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH="'${PYTHONPATH}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
 )
 
 # ------------------------- Launch -------------------------

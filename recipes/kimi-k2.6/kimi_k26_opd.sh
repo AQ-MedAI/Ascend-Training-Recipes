@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
-# Kimi-K2.6 GRPO RL with verl 0.8.0 + Megatron (hybrid engine)
-#
-# 传递链路(代码已核实):
-#   rollout.engine_config        -> vLLM AsyncEngineArgs (online_vllm_backend.py, 改名7个+同名透传)
-#   remote_megatron_config       -> Megatron args (megatron_config.py set_args 按名透传, bridge路从HF config推断结构)
-#   allocation_mode              -> dp/tp/pp/cp/ep (alloc_mode.py)
-#   gconfig                      -> 采样 (convert_sample_keys: max_new_tokens->max_tokens)
-#   wrap_policy                  -> PPO (disable_value->GRPO, reward_norm group, recompute_logp->rollout logp)
-#
-# 硬性问题(非映射问题):
-#   [B] rollout EP=128 与 verl "EP>1需EP=TP*DP(=40)" 冲突, 本脚本不设EP(默认1)。
-#   [D] NPU 上 attention_backend 需按 vllm-ascend 实际支持调整。
-# =====================================================
-
+# Full-model, single-teacher OPD with forward-KL top-k loss.
+# Use matching runtimes and identical shared paths on every Ray node.
+# Prepopulate remote model code in the shared HF_HOME cache for offline workers.
+# Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
 export PYTORCH_NPU_ALLOC_CONF="max_split_size_mb:256"     # PYTORCH_NPU_ALLOC_CONF: "max_split_size_mb:256"
 export CUDA_LAUNCH_BLOCKING=0
 export HYBRID_IGNORE_LOAD_CHECK=1
@@ -20,10 +10,8 @@ export USE_MAX_V2=0
 export HCCL_NPU_SOCKET_PORT_RANGE=62000-62050
 export HCCL_HOST_SOCKET_PORT_RANGE=62100-62200
 export NCCL_ALGO=Ring
-# export OMP_NUM_THREADS=1   # [fix] vllm engine core 子进程 torch OpenMP 线程池崩溃(Invalid thread pool/堆损坏),锁 1 线程
 # export MKL_NUM_THREADS=1
 # export NUMEXPR_NUM_THREADS=1
-
 
 set -xeuo pipefail
 
@@ -60,7 +48,6 @@ MAX_MODEL_LEN=$((max_prompt_length + max_response_length + 1))
 TEMPERATURE=1.0
 TOP_P=1.0
 TOP_K=1000000
-
 
 #####TEACHER######
 TEACHER_NNODES=16
@@ -199,7 +186,6 @@ REF=(
     actor_rollout_ref.ref.megatron.param_offload=True
 )
 
-
 ALGORITHM=(
     algorithm.adv_estimator=${adv_estimator}
     algorithm.gamma=1.0
@@ -224,7 +210,7 @@ TRAINER=(
 )
 
 REWARD=(
-    reward.custom_reward_function.path=/path/to/k26_rl_reward.py   # orz math reward: 提 <answer>/\boxed{} 对 reward_model.ground_truth
+    reward.custom_reward_function.path=/path/to/k26_rl_reward.py
     reward.custom_reward_function.name=compute_score
 )
 
@@ -237,7 +223,6 @@ EXTRA=(
     "+ray_kwargs.ray_init.runtime_env.env_vars.VLLM_RPC_TIMEOUT='1800000'"
     "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_TEACHER_DEDICATED_RACK='1'"
 )
-
 
 TEACHER=(
     distillation.enabled=True

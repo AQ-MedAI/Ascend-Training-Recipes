@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
-# Kimi-K2.6 GRPO RL with verl 0.8.0 + Megatron (hybrid engine)
-#
-# 传递链路(代码已核实):
-#   rollout.engine_config        -> vLLM AsyncEngineArgs (online_vllm_backend.py, 改名7个+同名透传)
-#   remote_megatron_config       -> Megatron args (megatron_config.py set_args 按名透传, bridge路从HF config推断结构)
-#   allocation_mode              -> dp/tp/pp/cp/ep (alloc_mode.py)
-#   gconfig                      -> 采样 (convert_sample_keys: max_new_tokens->max_tokens)
-#   wrap_policy                  -> PPO (disable_value->GRPO, reward_norm group, recompute_logp->rollout logp)
-#
-# 硬性问题(非映射问题):
-#   [B] rollout EP=128 与 verl "EP>1需EP=TP*DP(=40)" 冲突, 本脚本不设EP(默认1)。
-#   [D] NPU 上 attention_backend 需按 vllm-ascend 实际支持调整。
-# =====================================================
-
+# Full-model, two-teacher reverse-KL configuration.
+# Use matching runtimes and identical shared paths on every Ray node.
+# Prepopulate remote model code in the shared HF_HOME cache for offline workers.
+# Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
 export PYTORCH_NPU_ALLOC_CONF="max_split_size_mb:256"     # PYTORCH_NPU_ALLOC_CONF: "max_split_size_mb:256"
 export CUDA_LAUNCH_BLOCKING=0
 export HYBRID_IGNORE_LOAD_CHECK=1
@@ -20,10 +10,8 @@ export USE_MAX_V2=0
 export HCCL_NPU_SOCKET_PORT_RANGE=62000-62050
 export HCCL_HOST_SOCKET_PORT_RANGE=62100-62200
 export NCCL_ALGO=Ring
-# export OMP_NUM_THREADS=1   # [fix] vllm engine core 子进程 torch OpenMP 线程池崩溃(Invalid thread pool/堆损坏),锁 1 线程
 # export MKL_NUM_THREADS=1
 # export NUMEXPR_NUM_THREADS=1
-
 
 set -xeuo pipefail
 
@@ -48,9 +36,7 @@ HF_MODEL_PATH=/path/to/Kimi-K2.6_bf16
 # TEST_PATH=/path/to/k26_rl_valid.parquet
 DEFAULT_LOCAL_DIR=/path/to/ckpt-1
 
-# 数据 (减层 fullvocab 双源, 按 data_source 路由 2 教师)
 # Dataset A: gsm8k  (data_source = "openai/gsm8k") -> teacher gsm8k
-# Dataset B: math   (data_source = "math", orz_math_train.parquet 实测) -> teacher math
 gsm8k_train=/path/to/train.parquet
 gsm8k_test=/path/to/test.parquet
 math_train=/path/to/k26_rl_train.parquet
@@ -70,20 +56,19 @@ TEMPERATURE=1.0
 TOP_P=1.0
 TOP_K=1000000
 
-
 #####TEACHER OverView######
 TEACHER_NNODES=16
 TEACHER_GPUS_PER_NODE=16
 #forward_kl_topk / reverse_kl_full_vocab
 distillation_loss_mode=reverse_kl_full_vocab
-full_vocab_chunk_tokens=${FULL_VOCAB_CHUNK_TOKENS:-4096}   # fullvocab readme 默认值 (一次 chunk 处理多 token). OOM 再砍 2048.
+full_vocab_chunk_tokens=${FULL_VOCAB_CHUNK_TOKENS:-4096}
 distillation_topk=64
 use_policy_gradient=False
 teacher_key=data_source
 teacher_max_num_batched_tokens=$MAX_MODEL_LEN
 ##### Teacher1 #####
 TEACHER_MODEL_1=/path/to/Kimi-K2.6_bf16
-TEACHER_NUM_REPLICAS_1=2
+TEACHER_NUM_REPLICAS_1=1
 teacher_label_1=gsm8k
 teacher_tp_1=8
 teacher_dp_1=1
@@ -92,7 +77,7 @@ teacher_pcp_1=16
 teacher_gpu_mem_util_1=0.7
 ##### Teacher2 #####
 TEACHER_MODEL_2=/path/to/Kimi-K2.6_bf16
-TEACHER_NUM_REPLICAS_2=2
+TEACHER_NUM_REPLICAS_2=1
 teacher_label_2=math
 teacher_tp_2=8
 teacher_dp_2=1
@@ -225,7 +210,6 @@ REF=(
     actor_rollout_ref.ref.megatron.param_offload=True
 )
 
-
 ALGORITHM=(
     algorithm.adv_estimator=${adv_estimator}
     algorithm.gamma=1.0
@@ -241,16 +225,16 @@ TRAINER=(
     trainer.experiment_name=${exp_name}
     trainer.n_gpus_per_node=16
     trainer.nnodes=40
-    trainer.save_freq=100
+    trainer.save_freq=10
     trainer.val_before_train=False
     trainer.test_freq=10
     trainer.total_epochs=1
-    trainer.total_training_steps=30
+    trainer.total_training_steps=1145
     trainer.default_local_dir=${DEFAULT_LOCAL_DIR}
 )
 
 REWARD=(
-    reward.custom_reward_function.path=/path/to/k26_rl_reward.py   # orz math reward: 提 <answer>/\boxed{} 对 reward_model.ground_truth
+    reward.custom_reward_function.path=/path/to/k26_rl_reward.py
     reward.custom_reward_function.name=compute_score
 )
 
@@ -265,11 +249,8 @@ EXTRA=(
     "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_TEACHER_DEDICATED_RACK='1'"
 )
 
-
 TEACHER=(
     distillation.enabled=True
-    distillation.share_gpu_group=True
-    distillation.max_awake_teachers=1
     distillation.n_gpus_per_node=${TEACHER_GPUS_PER_NODE}
     distillation.nnodes=${TEACHER_NNODES}
     distillation.distillation_loss.loss_mode=${distillation_loss_mode}
