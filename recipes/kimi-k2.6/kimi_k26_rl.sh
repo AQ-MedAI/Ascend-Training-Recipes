@@ -95,6 +95,7 @@ WANDB_MODE="${WANDB_MODE:-offline}"
 WANDB_DIR="${WANDB_DIR:-${OUTPUT_DIR%/}/wandb}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 TENSORBOARD_DIR="${TENSORBOARD_DIR:-/path/to/tensorboard}"
+TRANSFORMERS_VERBOSITY="${TRANSFORMERS_VERBOSITY:-error}"
 if [[ -z "${LOGGER:-}" ]]; then
     if [[ "${WITH_TRACKING}" == "true" ]]; then
         LOGGER='["console","tensorboard","wandb"]'
