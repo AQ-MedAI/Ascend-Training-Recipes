@@ -18,8 +18,8 @@ export PYTHONPATH="$RECIPE_ROOT:$VERL_ROOT:$MINDSPEED_ROOT:$MINDSPEED_LLM_ROOT:$
 if [[ "$_recipe_profile" == v41 ]]; then
     export DEPENDENCY_ROOT="${DEPENDENCY_ROOT:-/opt/ascend-training}"
     export MEGATRON_ROOT="${MEGATRON_ROOT:-$DEPENDENCY_ROOT/Megatron-LM}"
-    export VLLM_ROOT="${VLLM_ROOT:-$DEPENDENCY_ROOT/workspace/rollout/dsv41/build-src/vllm}"
-    export VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-$DEPENDENCY_ROOT/workspace/rollout/dsv41/build-src/vllm-ascend}"
+    export VLLM_ROOT="${VLLM_ROOT:-$DEPENDENCY_ROOT/vllm}"
+    export VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-$DEPENDENCY_ROOT/vllm-ascend}"
     export PYTHON_BIN="${PYTHON_BIN:-python3}"
     export ROLLOUT_PYTHON="${ROLLOUT_PYTHON:-$("$PYTHON_BIN" -c 'import sys; print(sys.executable)')}"
     export V41_CONFIG_SOURCE="$VLLM_ASCEND_ROOT/vllm_ascend/deepseek_v41_config.py"

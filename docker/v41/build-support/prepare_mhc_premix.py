@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -97,7 +98,7 @@ def prepare(output):
         'get_filename_component(TENSOR_API "${OPTENSOR_SOURCE_PATH}/include/tensor_api" REALPATH)\n')
     # Reuse the exact offline preparation used by the image Dockerfile.
     subprocess.run([sys.executable, str(root / 'workspace/rollout/dsv41/prepare_native_deps.py')], check=True)
-    existing = root / 'workspace/rollout/dsv41/build-src/vllm-ascend/csrc/third_party'
+    existing = Path(os.environ.get('VLLM_ASCEND_ROOT', root / 'vllm-ascend')) / 'csrc/third_party'
     for name in ('makeself', 'json', 'abseil-cpp', 'ascend_protobuf'):
         src = existing / name
         if not src.is_dir():

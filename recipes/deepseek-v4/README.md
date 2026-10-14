@@ -39,7 +39,7 @@ bash recipes/deepseek-v4/dsv4_flash_rl_8npu_cutlayer.sh
 
 V4 入口统一通过 `tools/v4_environment.sh` 初始化依赖：四个 fork 默认来自本仓库
 `third_party`，Megatron-LM 和 vLLM/vLLM-Ascend 来自镜像。默认镜像根目录为
-`/opt/ascend-training`，vLLM 路径复用镜像的 `workspace/rollout/dsv41/build-src` 布局；
+`/opt/ascend-training`，vLLM 和 vLLM-Ascend 默认位于该根目录下，与 Megatron-LM 同级；
 目录名称不代表 V4 已完成兼容性验证。使用旧 V4 镜像时显式指定实际源码目录：
 
 ```bash

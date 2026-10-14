@@ -27,7 +27,7 @@ def main():
             "V4 sources are pinned, but its complete image compatibility contract is not yet validated. "
             "Do not install them into the V4.1 image automatically."
         )
-    report_dir = Path(os.environ.get("V41_IMAGE_METADATA", "/opt/v41-image"))
+    report_dir = Path(os.environ.get("V41_IMAGE_METADATA", "/opt/ascend-training/manifest"))
     receipt = report_dir / "frameworks.json"
     if not receipt.is_file():
         raise SystemExit(f"Missing built V4.1 framework receipt: {receipt}; use the matching framework image")

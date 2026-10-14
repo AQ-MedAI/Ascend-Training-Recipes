@@ -2,7 +2,7 @@
 # Build only image-owned frameworks and native operators. No recipe runtime or forks are installed.
 set -eo pipefail
 ROOT=/opt/ascend-training
-INPUT=/opt/v41-image/locks
+INPUT=/tmp/ascend-image-build/locks
 # Check installation inputs before fetching or compiling.
 for lock in build; do
     [[ -s "$INPUT/$lock.lock" ]] || {
@@ -22,7 +22,7 @@ export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 # Prefer the full hash lock when available. Development builds may use fixed inputs.
 if [[ -s "$INPUT/runtime.lock" ]]; then
     uv pip install --python "$PYTHON_BIN" --require-hashes --no-deps \
-        --constraint /opt/v41-image/hardware-constraints.txt -r "$INPUT/runtime.lock"
+        --constraint /tmp/ascend-image-build/hardware-constraints.txt -r "$INPUT/runtime.lock"
 else
     install_args=()
     case "${PYTHON_DEPENDENCY_MODE:-resolve}" in
@@ -38,12 +38,13 @@ fi
 "$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$ROOT/Megatron-LM"
 rollout="$ROOT/workspace/rollout/dsv41"
 mkdir -p "$rollout/build-src"
+export VLLM_ROOT="$ROOT/vllm" VLLM_ASCEND_ROOT="$ROOT/vllm-ascend"
 "$PYTHON_BIN" - <<'PY'
 import json
 import subprocess
 from pathlib import Path
-registry = json.loads(Path('/opt/v41-image/registry.json').read_text())['rollout']['v41']
-root = Path('/opt/ascend-training/workspace/rollout/dsv41/build-src')
+registry = json.loads(Path('/tmp/ascend-image-build/registry.json').read_text())['rollout']['v41']
+root = Path('/opt/ascend-training')
 for name, key in [('vllm', 'vllm'), ('vllm-ascend', 'vllm_ascend')]:
     source = registry[key]
     path = root / name
@@ -55,16 +56,16 @@ for name, key in [('vllm', 'vllm'), ('vllm-ascend', 'vllm_ascend')]:
 PY
 download_args=()
 [[ "${DEPENDENCY_OFFLINE:-0}" != 1 ]] || download_args+=(--offline)
-"$PYTHON_BIN" /opt/v41-image/download_dependencies.py --workspace "$ROOT/workspace" "${download_args[@]}"
+"$PYTHON_BIN" /tmp/ascend-image-build/download_dependencies.py --workspace "$ROOT/workspace" "${download_args[@]}"
 "$PYTHON_BIN" "$rollout/prepare_native_deps.py"
 build_root="$rollout/build-src"
 VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE=0.1.dev1+ga97dacb7106ee.empty \
     VLLM_REQUIRE_RUST_FRONTEND=0 "$PYTHON_BIN" -m pip install \
-    --no-deps --no-build-isolation -e "$build_root/vllm"
-export PYTHONPATH="$build_root/vllm:$build_root/vllm-ascend"
+    --no-deps --no-build-isolation -e "$VLLM_ROOT"
+export PYTHONPATH="$VLLM_ROOT:$VLLM_ASCEND_ROOT"
 SETUPTOOLS_SCM_PRETEND_VERSION=0.1.dev1+ge67ab649500f COMPILE_CUSTOM_KERNELS=1 \
     "$PYTHON_BIN" -m pip install \
-    --no-deps --no-build-isolation -e "$build_root/vllm-ascend"
+    --no-deps --no-build-isolation -e "$VLLM_ASCEND_ROOT"
 unset PYTHONPATH
 export V41_MHC_SOC=ascend910_93 V41_MHC_BUILD_JOBS="${MAX_JOBS:-4}"
 bash workspace/tests/dsv41/build_mhc_premix.sh
@@ -78,14 +79,16 @@ test -s "$build_root/mhc-premix/env.sh"
 if ! "$PYTHON_BIN" -m pip check; then
     echo 'Dependency metadata conflicts reported above; continuing with the fixed deployment versions.' >&2
 fi
-"$PYTHON_BIN" -I /opt/v41-image/collect_environment.py > /opt/v41-image/runtime-environment.json
+mkdir -p "$ROOT/manifest"
+"$PYTHON_BIN" -I /tmp/ascend-image-build/collect_environment.py > "$ROOT/manifest/runtime-environment.json"
 "$PYTHON_BIN" - <<'PY'
 import json
 import subprocess
 from pathlib import Path
-root = Path('/opt/v41-image')
+root = Path('/tmp/ascend-image-build')
+manifest = Path('/opt/ascend-training/manifest')
 expected = {'torch':'2.10.0', 'torch-npu':'2.10.0.post4', 'triton-ascend':'3.2.2', 'triton':'3.5.0'}
-report = json.loads((root / 'runtime-environment.json').read_text())
+report = json.loads((manifest / 'runtime-environment.json').read_text())
 packages = {p['name'].lower().replace('_', '-'):p['version'].split('+')[0] for p in report['packages']}
 expected.update({'numpy': '1.26.4', 'transformers': '5.14.1', 'fastapi': '0.123.10',
                  'starlette': '0.50.0', 'opencv-python-headless': '5.0.0.93',
@@ -95,5 +98,54 @@ assert all(packages.get(k) == v for k,v in expected.items()), packages
 registry = json.loads((root/'registry.json').read_text())['rollout']['v41']
 receipt = {'profile':'v41', 'python_environment':'single', 'vllm':registry['vllm']['commit'], 'vllm-ascend':registry['vllm_ascend']['commit'],
            'megatron':json.loads((root/'megatron-source.json').read_text())}
-(root/'frameworks.json').write_text(json.dumps(receipt, indent=2)+'\n')
+(manifest/'frameworks.json').write_text(json.dumps(receipt, indent=2)+'\n')
 PY
+
+# Keep provenance and licenses; remove build-only inputs after successful validation.
+"$PYTHON_BIN" - <<'PY_CLEANUP'
+import json
+import shutil
+from pathlib import Path
+build = Path('/tmp/ascend-image-build')
+root = Path('/opt/ascend-training')
+for name in ('registry.json', 'megatron-source.json', 'native-dependencies.json', 'Megatron-LM-LICENSE'):
+    shutil.copy2(build / name, root / 'manifest' / name)
+workspace = root / 'workspace'
+mhc = workspace / 'rollout/dsv41/build-src/mhc-premix'
+# Preserve installed operators and Python wrappers; remove only build inputs.
+for runtime_dir in (mhc / 'opp', mhc / 'python'):
+    for link in runtime_dir.rglob('*'):
+        if link.is_symlink() and any(link.resolve().is_relative_to(mhc / name) for name in ('source', 'wheels')):
+            raise RuntimeError(f'Runtime link still depends on build inputs: {link}')
+source = mhc / 'source'
+# Retain third-party notices before dropping the unpacked build tree.
+for notice in source.rglob('*'):
+    if notice.is_file() and not notice.is_symlink() and notice.name.upper().startswith(('LICENSE', 'COPYING', 'NOTICE')):
+        target = root / 'manifest/licenses/mhc-premix' / notice.relative_to(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(notice, target)
+for name in ('source', 'wheels'):
+    path = mhc / name
+    if path.is_symlink():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+for asset in json.loads((build / 'native-dependencies.json').read_text())['assets']:
+    path = (workspace / asset['path']).resolve()
+    if not path.is_relative_to(workspace.resolve()):
+        raise ValueError(f'Archive outside workspace: {path}')
+    if path.name.endswith(('.tar.gz', '.tgz', '.tar.xz', '.zip')):
+        path.unlink(missing_ok=True)
+for name in ('prepare_mhc_premix.py', 'build_mhc_premix.sh', 'native_operator_env.sh'):
+    (workspace / 'tests/dsv41' / name).unlink(missing_ok=True)
+(workspace / 'rollout/dsv41/prepare_native_deps.py').unlink(missing_ok=True)
+shutil.rmtree(build)
+# Prune only empty helper/material directories, never runtime directories.
+for base in (workspace / 'tests', workspace / 'third_party/mhc-premix'):
+    if base.is_dir():
+        for path in sorted(base.rglob('*'), key=lambda p: len(p.parts), reverse=True):
+            if path.is_dir() and not path.is_symlink() and not any(path.iterdir()):
+                path.rmdir()
+        if not any(base.iterdir()):
+            base.rmdir()
+PY_CLEANUP

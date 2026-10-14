@@ -32,12 +32,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -c 'import pathlib, sysconfig; assert (pathlib.Path(sysconfig.get_path("include")) / "Python.h").is_file(), "Python 3.12 development headers are required"'
 
 # Version-pinned bootstrap, not a complete hashed environment lock.
-COPY docker/v41/hardware-requirements.txt docker/v41/hardware-constraints.txt /opt/v41-image/
+COPY docker/v41/hardware-requirements.txt docker/v41/hardware-constraints.txt /tmp/ascend-image-build/
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install --only-binary=:all: \
         --extra-index-url https://mirrors.huaweicloud.com/ascend/repos/pypi \
-        --constraint /opt/v41-image/hardware-constraints.txt \
-        -r /opt/v41-image/hardware-requirements.txt && \
+        --constraint /tmp/ascend-image-build/hardware-constraints.txt \
+        -r /tmp/ascend-image-build/hardware-requirements.txt && \
     python3 -c 'import importlib.metadata as m; expected={"torch":"2.10.0","torch-npu":"2.10.0.post4","triton-ascend":"3.2.2","triton":"3.5.0"}; actual={k:m.version(k).split("+",1)[0] for k in expected}; assert actual == expected, (expected, actual)'
 
 # V4 may reuse --target common; this framework layer is specific to V4.1.
@@ -62,16 +62,16 @@ RUN [[ "$MEGATRON_REPOSITORY" == https://* ]] && \
     test "$(git -C Megatron-LM rev-parse HEAD)" = "$MEGATRON_COMMIT"
 
 # Reconstruct the reviewed V4.1 source tree from an upstream commit plus a local patch.
-COPY docker/v41/megatron-v41.patch docker/v41/megatron-source.json docker/v41/Megatron-LM-LICENSE /opt/v41-image/
+COPY docker/v41/megatron-v41.patch docker/v41/megatron-source.json docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
 RUN python3 - <<'VERIFY_MEGATRON'
 import hashlib
 import json
 import subprocess
 from pathlib import Path
-manifest = json.loads(Path('/opt/v41-image/megatron-source.json').read_text())
+manifest = json.loads(Path('/tmp/ascend-image-build/megatron-source.json').read_text())
 root = Path('/opt/ascend-training/Megatron-LM')
 assert subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip() == manifest['base_commit']
-patch = Path('/opt/v41-image') / manifest['patch']
+patch = Path('/tmp/ascend-image-build') / manifest['patch']
 assert hashlib.sha256(patch.read_bytes()).hexdigest() == manifest['patch_sha256']
 subprocess.run(['git', '-C', str(root), 'apply', '--check', str(patch)], check=True)
 subprocess.run(['git', '-C', str(root), 'apply', str(patch)], check=True)
@@ -80,20 +80,20 @@ for name, expected in manifest['patched_files'].items():
 VERIFY_MEGATRON
 
 # Only image-owned sources are built here; recipe forks/runtime are installed after cloning.
-COPY dependencies/registry.json /opt/v41-image/registry.json
+COPY dependencies/registry.json /tmp/ascend-image-build/registry.json
 # A complete runtime lock is optional for development builds; fixed inputs are included.
-COPY docker/v41/locks/ /opt/v41-image/locks/
+COPY docker/v41/locks/ /tmp/ascend-image-build/locks/
 COPY docker/v41/build-support/prepare_native_deps.py /opt/ascend-training/workspace/rollout/dsv41/
 COPY docker/v41/build-support/prepare_mhc_premix.py docker/v41/build-support/build_mhc_premix.sh docker/v41/build-support/native_operator_env.sh /opt/ascend-training/workspace/tests/dsv41/
-COPY docker/v41/build-runtime.sh docker/v41/collect_environment.py docker/v41/download_dependencies.py docker/v41/native-dependencies.json /opt/v41-image/
+COPY docker/v41/build-runtime.sh docker/v41/collect_environment.py docker/v41/download_dependencies.py docker/v41/native-dependencies.json /tmp/ascend-image-build/
 RUN --mount=type=cache,target=/root/.cache/ascend-training-recipes \
     --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
-    PIP_CACHE_DIR=/root/.cache/pip UV_CACHE_DIR=/root/.cache/uv MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" PYTHON_DEPENDENCY_MODE="${PYTHON_DEPENDENCY_MODE}" bash /opt/v41-image/build-runtime.sh
+    PIP_CACHE_DIR=/root/.cache/pip UV_CACHE_DIR=/root/.cache/uv MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" PYTHON_DEPENDENCY_MODE="${PYTHON_DEPENDENCY_MODE}" bash /tmp/ascend-image-build/build-runtime.sh
 
 # Training and rollout share Python dependencies; native loader settings remain role-specific.
-ENV VLLM_ROOT=/opt/ascend-training/workspace/rollout/dsv41/build-src/vllm \
-    VLLM_ASCEND_ROOT=/opt/ascend-training/workspace/rollout/dsv41/build-src/vllm-ascend \
+ENV VLLM_ROOT=/opt/ascend-training/vllm \
+    VLLM_ASCEND_ROOT=/opt/ascend-training/vllm-ascend \
     V41_MHC_PRE_BACKEND=premix \
     V41_INDEXER_BACKEND=lightning \
     V41_RMSNORM_BACKEND=native \

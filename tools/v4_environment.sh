@@ -8,7 +8,7 @@ export MINDSPEED_LLM_ROOT="${MINDSPEED_LLM_ROOT:-$RECIPE_ROOT/third_party/MindSp
 export MBRIDGE_ROOT="${MBRIDGE_ROOT:-$RECIPE_ROOT/third_party/mbridge}"
 export MEGATRON_ROOT="${MEGATRON_ROOT:-$DEPENDENCY_ROOT/Megatron-LM}"
 # Shared image layout; override both paths when using a separate V4 runtime.
-export VLLM_ROOT="${VLLM_ROOT:-$DEPENDENCY_ROOT/workspace/rollout/dsv41/build-src/vllm}"
-export VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-$DEPENDENCY_ROOT/workspace/rollout/dsv41/build-src/vllm-ascend}"
+export VLLM_ROOT="${VLLM_ROOT:-$DEPENDENCY_ROOT/vllm}"
+export VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-$DEPENDENCY_ROOT/vllm-ascend}"
 export PYTHON_BIN="${PYTHON_BIN:-python3}"
 export PYTHONPATH="$RECIPE_ROOT:$VERL_ROOT:$MINDSPEED_ROOT:$MINDSPEED_LLM_ROOT:$MBRIDGE_ROOT:$MEGATRON_ROOT:$VLLM_ASCEND_ROOT:$VLLM_ROOT:${PYTHONPATH:-}"

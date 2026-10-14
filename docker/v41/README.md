@@ -10,7 +10,7 @@
 
 基础标签来自 [verl 上游 Dockerfile](https://github.com/verl-project/verl/blob/main/docker/ascend/Dockerfile.ascend_9.1.0_a3_v0.9.1)：`swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12`。正式发布仍需固定目标架构 digest。CANN/ATB、编译器及驱动配套须验收。当前构建目标沿用 `ascend910_9382`，与上游示例的 `9392` 不同，需按实际芯片确认。
 
-镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。它只从 registry 读取 vLLM/vLLM-Ascend 的固定提交。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/v41-image/frameworks.json`。
+镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。它只从 registry 读取 vLLM/vLLM-Ascend 的固定提交。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
 
 ## 固定框架
 
@@ -95,3 +95,31 @@ python3 docker/v41/download_dependencies.py \
 ## 仅能通过 OSS 和 Dockerfile 导入的平台
 
 本地镜像构建完成后，使用 [OSS 导出与重建流程](OSS_IMPORT.md)。导出脚本生成 rootfs 归档及包含原镜像运行配置的 Dockerfile；内部平台只需能拉取工具镜像并下载 OSS 文件，无需执行 `docker load`。
+
+## Framework source layout
+
+The image installs these editable source trees at sibling paths:
+
+```text
+/opt/ascend-training/Megatron-LM
+/opt/ascend-training/vllm
+/opt/ascend-training/vllm-ascend
+```
+
+`workspace/rollout/dsv41/build-src` contains auxiliary builds such as MHC Premix,
+not the installed vLLM source trees. Recipe forks remain in `third_party` after cloning.
+Existing images retain their original layout; rebuild to adopt these paths. For older
+images, explicitly set `VLLM_ROOT` and `VLLM_ASCEND_ROOT` to their installed locations.
+Moving editable source trees manually does not update their Python installation records.
+
+## Build inputs and runtime records
+
+Build helpers, patches and dependency locks are staged under `/tmp/ascend-image-build`
+and removed after the framework build and validation succeed. Downloaded source archives
+are removed from the runtime filesystem; BuildKit download caches remain reusable.
+`/opt/ascend-training/manifest/` retains framework commits, the Python environment report,
+native dependency checksums, the dependency registry and the Megatron license/source record.
+Editable framework sources and MHC runtime libraries/environment files remain in place.
+This cleans the final filesystem; files copied in earlier Docker layers can still occupy
+space in those layers. It does not claim to minimize the image's layered storage size.
+For an older image, set `V41_IMAGE_METADATA=/opt/v41-image` when running environment checks.

@@ -62,7 +62,7 @@ class V41Replica(vLLMReplica):
             root=Path(__file__).resolve().parents[4]
             image=Path(os.environ.get('DEPENDENCY_ROOT','/opt/ascend-training'))
             python=os.environ.get('ROLLOUT_PYTHON',sys.executable)
-            paths=[os.environ.get(key,str(image/'workspace/rollout/dsv41/build-src'/name))
+            paths=[os.environ.get(key,str(image/name))
                    for key,name in (('VLLM_ROOT','vllm'),('VLLM_ASCEND_ROOT','vllm-ascend'))]
             paths += [os.environ.get('VERL_ROOT',str(root/'third_party/verl')),str(root)]
             paths += os.environ.get('PYTHONPATH','').split(os.pathsep)

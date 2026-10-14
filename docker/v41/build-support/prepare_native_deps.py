@@ -1,6 +1,7 @@
 """Stage Dockerfile's local native dependencies without network access."""
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
@@ -72,13 +73,14 @@ def prepare(root):
         path = workspace / name
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
             raise ValueError(f'Missing or changed offline archive: {path}')
-    ascend = root / 'build-src/vllm-ascend'
+    ascend = Path(os.environ.get('VLLM_ASCEND_ROOT', workspace.parent / 'vllm-ascend'))
     config = ascend / '.gitmodules'
     if CATLASS_COMMIT not in config.read_text():
         raise ValueError('Ascend Catlass pin differs; re-audit archives before building.')
     target = ascend / 'csrc/third_party'
     target.mkdir(parents=True, exist_ok=True)
     # Prepare completely before publishing; retain existing native build outputs.
+    (root / 'build-src').mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.native-deps-', dir=root / 'build-src') as tmp:
         temp = Path(tmp)
         for name in ('catlass.tar.gz', 'catlass_git.tar.gz', 'makeself-release-2.5.0-patch1.tar.gz'):
