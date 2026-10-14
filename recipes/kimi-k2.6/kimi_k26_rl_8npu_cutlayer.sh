@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHON_BIN="${PYTHON_BIN:-python3}"
 export MODEL_PATH="${MODEL_PATH:-${CUT_MODEL_PATH:-${TMPDIR:-/tmp}/kimi_k26_bf16_4layers_model}}"
+export FULL_MODEL_PATH="${FULL_MODEL_PATH:-/path/to/kimi-k2.6-bf16}"
 if (( $# != 0 )); then
     echo 'This smoke entry does not accept Hydra overrides; use environment variables for paths.' >&2
     exit 2

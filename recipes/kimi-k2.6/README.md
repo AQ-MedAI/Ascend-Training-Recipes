@@ -7,7 +7,7 @@
 | [kimi_k26_rl.sh](kimi_k26_rl.sh) | Full-model GRPO; environment and Hydra overrides supported |
 | [kimi_k26_rl_8npu_cutlayer.sh](kimi_k26_rl_8npu_cutlayer.sh) | Four-layer RL smoke test, one node with eight NPUs, two steps |
 | [kimi_k26_mopd.sh](kimi_k26_mopd.sh) | Full-model, two-teacher full-vocabulary MOPD; reverse KL by default |
-| [kimi_k26_mopd_4node_cutlayer.sh](kimi_k26_mopd_4node_cutlayer.sh) | Four-layer, two-teacher full-vocabulary MOPD; four student nodes plus teacher resources |
+| [kimi_k26_mopd_16npu_cutlayer.sh](kimi_k26_mopd_16npu_cutlayer.sh) | Four-layer, two-teacher full-vocabulary MOPD smoke test on one 16-NPU node |
 | [kimi_k26_opd.sh](kimi_k26_opd.sh) | Full-model, single-teacher forward-KL top-k OPD |
 | [kimi_k26_mopd_reverse_kl.sh](kimi_k26_mopd_reverse_kl.sh) | Alternative full-model two-teacher reverse-KL profile |
 | [kimi_k26_mopd_shared_teacher.sh](kimi_k26_mopd_shared_teacher.sh) | Shared teacher pool; at most one awake teacher |
