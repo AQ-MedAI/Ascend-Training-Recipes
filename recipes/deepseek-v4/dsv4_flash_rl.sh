@@ -373,7 +373,7 @@ ROLLOUT_CONFIG=(
     actor_rollout_ref.rollout.tensor_model_parallel_size="${ROLLOUT_TP}"
     actor_rollout_ref.rollout.data_parallel_size="${ROLLOUT_DP}"
     actor_rollout_ref.rollout.expert_parallel_size="${ROLLOUT_EP}"
-    actor_rollout_ref.rollout.enforce_eager=False
+    actor_rollout_ref.rollout.enforce_eager=True
     actor_rollout_ref.rollout.free_cache_engine=True
 )
 
