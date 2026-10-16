@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Docker
+docker/v41/tests/
+docker/v41/OSS_IMPORT.md
+docker/v41/export_oss_image.py

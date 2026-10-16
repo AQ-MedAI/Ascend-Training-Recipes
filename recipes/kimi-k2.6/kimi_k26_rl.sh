@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Kimi-K2.6 GRPO training with verl + Megatron + vLLM.
-# Usage: override any variable before the command, e.g. ACTOR_TP=4 NNODES=8 bash recipes/kimi-k2.6/kimi_k26_verl.sh
+# Usage: override any variable before the command, e.g. ACTOR_TP=4 NNODES=8 bash recipes/kimi-k2.6/kimi_k26_rl.sh
 
 set -xeuo pipefail
+K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 export VERL_ROOT="${VERL_ROOT:-$RECIPE_ROOT/third_party/verl}"
@@ -270,11 +271,19 @@ EXTRA=(
     +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE="'200'"
     +ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE="'200'"
     +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'0'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH="'${PYTHONPATH}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY="'${TRANSFORMERS_VERBOSITY}'"
+)
+
+# Select the K26 runtime and propagate the same source paths to Ray workers.
+source "${K26_SCRIPT_DIR}/runtime_env.sh"
+EXTRA+=(
+    "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY}'"
 )
 
 # ------------------------- Launch -------------------------

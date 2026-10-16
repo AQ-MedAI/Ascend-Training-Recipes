@@ -4,6 +4,7 @@
 # Prepopulate remote model code in the shared HF_HOME cache for offline workers.
 # Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
 set -xeuo pipefail
+K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- NPU environment ----
 export HF_HOME=${HF_HOME:-/path/to/hf_cache}
@@ -261,12 +262,12 @@ REWARD=(
 )
 
 CANN_ENV_PROPAGATE=()
-CANN_ENV_NAMES=(PYTHONPATH LD_LIBRARY_PATH ASCEND_HOME_PATH ASCEND_OPP_PATH \
+CANN_ENV_NAMES=(LD_LIBRARY_PATH ASCEND_HOME_PATH ASCEND_OPP_PATH \
     ASCEND_AICPU_PATH ASCEND_TOOLKIT_HOME ASCEND_TOOLKIT_LATEST_HOME \
     ATB_HOME_PATH TOOLCHAIN_HOME CMAKE_PREFIX_PATH ASCEND_RUNTIME_OPTIONS \
     HCCL_OP_EXPANSION_MODE HF_HOME HF_HUB_OFFLINE TRANSFORMERS_OFFLINE)
 for _v in "${CANN_ENV_NAMES[@]}"; do
-    _val="${!_v}"
+    _val="${!_v:-}"
     [ -z "$_val" ] && continue
     if [ "$_v" = "PYTHONPATH" ]; then
         _val="${VERL_ROOT}:${_val}"
@@ -328,6 +329,15 @@ EXTRA=(
     "+ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE='256'"
     "+ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE='0'"
     "${CANN_ENV_PROPAGATE[@]}"
+)
+
+# Select the K26 runtime and propagate the same source paths to Ray workers.
+source "${K26_SCRIPT_DIR}/runtime_env.sh"
+EXTRA+=(
+    "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY}'"
 )
 
 ########################### launch ###########################

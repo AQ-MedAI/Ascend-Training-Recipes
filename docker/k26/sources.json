@@ -1,0 +1,18 @@
+{
+  "status": "adaptation-required",
+  "sources": {
+    "Megatron-LM": {
+      "repository": "https://github.com/NVIDIA/Megatron-LM.git",
+      "commit": "96ea1d1c1a7ba8c2e0f7bbd06083e82b41187472"
+    },
+    "Megatron-Bridge": {
+      "repository": "https://github.com/NVIDIA-NeMo/Megatron-Bridge.git",
+      "commit": "c15303e05b3d48505e4b1b0047faa0c321368856"
+    }
+  },
+  "unresolved": [
+    "K26 Ascend source patches",
+    "K26 Python dependency lock",
+    "vLLM and vLLM-Ascend revisions and native operators"
+  ]
+}

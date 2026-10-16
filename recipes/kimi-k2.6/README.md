@@ -73,3 +73,11 @@ python3 recipes/kimi-k2.6/prepare_kimi_k26_cut_model.py \
 ```
 
 The helper requires `torch` and `safetensors` in `PYTHON_BIN`'s environment.
+
+## Image preparation
+
+See [K26 image adaptation](../../docker/k26/README.md). The public Core/Bridge
+baselines are pinned, but the new image is currently a source-only candidate.
+RL and the 16-NPU MOPD smoke launcher validate the selected Core/Bridge paths
+through `runtime_env.sh`; set `MEGATRON_ROOT` and `MEGATRON_BRIDGE_ROOT` when
+using an existing compatible K26 environment.
