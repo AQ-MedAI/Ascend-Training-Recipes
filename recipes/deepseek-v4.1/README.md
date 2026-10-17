@@ -20,7 +20,7 @@ bash tools/setup_environment.sh v41
 source tools/activate.sh v41
 ```
 
-Megatron-LM、vLLM/vLLM-Ascend、rollout Python 和编译算子位于镜像的 `/opt/ascend-training`；四个 fork 和配套 runtime 位于 recipe。`DEPENDENCY_ROOT` 指镜像环境，`WORK_DIR` 是运行目录（默认 recipe 根目录）。不再要求原开发依赖仓库。完整镜像尚待依赖锁定和 NPU 验收。
+Megatron-LM、vLLM/vLLM-Ascend、rollout Python 和编译算子位于镜像的 `/opt/ascend-training`；四个源码依赖 和配套 runtime 位于 recipe。`DEPENDENCY_ROOT` 指镜像环境，`WORK_DIR` 是运行目录（默认 recipe 根目录）。不再要求原开发依赖仓库。完整镜像尚待依赖锁定和 NPU 验收。
 
 ## 单机运行示例
 
@@ -52,4 +52,4 @@ Engram hash 随 MindSpeed-LLM 的 V4.1 模型源码提供：`mindspeed_llm/tasks
 
 ### 默认框架目录
 
-先按[主 README](../../README.md#拉取源码)运行 `tools/setup_sources.sh` 初始化四个子模块。两个 V4.1 启动脚本默认从仓库的 `third_party/` 加载四个 fork；`DEPENDENCY_ROOT` 用于镜像中的框架和算子，四个框架路径可分别通过 `*_ROOT` 覆盖。MindSpeed-LLM 已固定包含 Engram 的提交，详见[依赖说明](../../docs/DEPENDENCIES.md#子模块与版本更新)。
+先按[主 README](../../README.md#拉取源码)运行 `tools/setup_sources.sh` 初始化四个子模块。两个 V4.1 启动脚本默认从仓库的 `third_party/` 加载四个源码依赖；`DEPENDENCY_ROOT` 用于镜像中的框架和算子，四个框架路径可分别通过 `*_ROOT` 覆盖。MindSpeed-LLM 已固定包含 Engram 的提交，详见[依赖说明](../../docs/DEPENDENCIES.md#子模块与版本更新)。

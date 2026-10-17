@@ -33,17 +33,16 @@
       }
     },
     "mbridge": {
-      "repository": "https://github.com/AQ-MedAI/mbridge",
+      "repository": "https://github.com/ISEEKYAN/mbridge.git",
       "profiles": {
         "v41": {
-          "branch": "aq/v41-integration",
-          "commit": "7b0035f9e9b9aea540f0fb39861468a9cf6ff9e8"
+          "commit": "0cd4ae23f2425da77a80cb3f517828452fa8e984"
         },
         "v4": {
-          "branch": "aq/v41-integration",
-          "commit": "7b0035f9e9b9aea540f0fb39861468a9cf6ff9e8"
+          "commit": "0cd4ae23f2425da77a80cb3f517828452fa8e984"
         }
-      }
+      },
+      "source_manifest": "dependencies/mbridge-sources.json"
     },
     "verl": {
       "repository": "https://github.com/AQ-MedAI/verl",

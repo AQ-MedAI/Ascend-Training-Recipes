@@ -8,8 +8,8 @@
 | v4 | [MindSpeed](https://github.com/AQ-MedAI/MindSpeed) | `aq/v4-integration` | `dcfc6c22b04a4c966d05e128421959f60e0e80c2` |
 | v41 | [MindSpeed-LLM](https://github.com/AQ-MedAI/MindSpeed-LLM) | `aq/v41-integration` | `9e2327037ffe651c72ef8f5807751d022805227d` |
 | v4 | [MindSpeed-LLM](https://github.com/AQ-MedAI/MindSpeed-LLM) | `aq/v41-integration` | `7ffccdc3fdea5f8eb25b5ce88aa0d45f9faa5042` |
-| v41 | [mbridge](https://github.com/AQ-MedAI/mbridge) | `aq/v41-integration` | `7b0035f9e9b9aea540f0fb39861468a9cf6ff9e8` |
-| v4 | [mbridge](https://github.com/AQ-MedAI/mbridge) | `aq/v41-integration` | `7b0035f9e9b9aea540f0fb39861468a9cf6ff9e8` |
+| v41 | [mbridge](https://github.com/ISEEKYAN/mbridge) | 上游 v0.15.1 + patch | `0cd4ae23f2425da77a80cb3f517828452fa8e984` |
+| v4 | [mbridge](https://github.com/ISEEKYAN/mbridge) | 上游 v0.15.1 + patch | `0cd4ae23f2425da77a80cb3f517828452fa8e984` |
 | v41 | [verl](https://github.com/AQ-MedAI/verl) | `aq/v41-integration` | `c73f779e4d6ebbf6172c3b020e47b3fd2f346d52` |
 | v4 | [verl](https://github.com/AQ-MedAI/verl) | `aq/v4-integration` | `e001090e88532bda2d4264bb806bc914fe7c6822` |
 | k26 | [verl](https://github.com/AQ-MedAI/verl) | `aq/k26-integration` | `be9a6dc3a01cadea0035fcb3e105eb665209d05e` |
@@ -18,15 +18,17 @@
 
 ## 子模块与版本更新
 
-框架代码在各自 fork 中维护，格式化使用对应框架自己的配置。
+MindSpeed、MindSpeed-LLM 和 verl 在各自 fork 中维护。mbridge 使用上游固定提交加 [patch](../patches/mbridge/README.md)。框架格式遵循上游配置，补丁文件禁止自动格式化。
 
 `third_party/` 中的四个 Git 子模块默认记录 V4.1 基线。`.gitmodules` 保存公开仓库地址，Git 子模块引用保存实际提交；`registry.json` 记录各模型的兼容组合。不要使用 `git submodule update --remote` 复现实验，它会跟随远端分支而绕过记录的版本。
 
 V4.1 的 MindSpeed-LLM 子模块固定为 `9e2327037ffe651c72ef8f5807751d022805227d`，包含随附的 `engram_hash.py`。V4 保持表中的原有提交。拉齐四个框架后仍须准备下文的运行时和原生算子。
 
-维护者更新依赖时，先将框架改动提交并推送到对应 fork，再在子模块中检出该提交、同步 registry 和本页的固定版本，最后在 recipe 仓库提交 `git add third_party/<仓库名>` 记录的引用。`.gitmodules` 与四个子模块引用必须随 recipe 一同提交，其他人初始化源码时才会得到正确版本。
+维护者更新三个 fork 依赖时，先将框架改动提交并推送到对应 fork，再在子模块中检出该提交、同步 registry 和本页的固定版本，最后在 recipe 仓库提交 `git add third_party/<仓库名>` 记录的引用。`.gitmodules` 与四个子模块引用必须随 recipe 一同提交，其他人初始化源码时才会得到正确版本。
 
 V4 使用本页的 V4 提交组合，并通过各脚本支持的路径配置指向对应 checkout。K2.6 仍有未固定组件，不使用默认 V4.1 组合替代。现有平级开发目录可继续保留；子模块是面向使用者的源码获取入口。
+
+mbridge 的子模块引用记录上游基线，`setup_sources.sh` 自动校验并应用 `patches/mbridge/ascend-training.patch`。补丁后的完整源码清单记录在 `dependencies/mbridge-sources.json`。应用后 `git status` 显示 mbridge 内部修改是正常状态；额外的源码修改或暂存修改会阻止再次初始化。不要在子模块中提交这份补丁，也不要用 `git restore` 丢弃它后直接运行训练。更新补丁时需同步校验值、源码清单和基线引用。
 
 ## V4 与 V4.1
 

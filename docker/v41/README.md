@@ -1,16 +1,16 @@
 # Ascend 镜像与 recipe 分层
 
-**候选构建文件，尚未完成 Docker 构建或 NPU 验收。** 镜像提供稳定框架环境，recipe 提供四个 fork、runtime 和训练配置。
+**候选构建文件，尚未完成 Docker 构建或 NPU 验收。** 镜像提供稳定框架环境，recipe 提供四个源码依赖、runtime 和训练配置。
 
 | 层 | 内容 | 使用范围 |
 | --- | --- | --- |
 | `common` | CANN 9.1.0 A3、Ubuntu 22.04、Python 3.12、torch 2.10.0、torch-npu 2.10.0.post4、Triton Ascend 3.2.2、Triton 3.5.0 | V4/V4.1 的公共构建基础，不是完整训练环境 |
 | `v41` | Megatron-LM 基线加补丁、固定 vLLM/vLLM-Ascend、原生算子、训练与 rollout 共用的 Python 依赖 | V4/V4.1 共用源码；两个 profile 均需镜像/NPU 验收 |
-| recipe | 四个 fork、`workspace/rollout/dsv41/runtime`、启动与初始化脚本 | 运行时克隆，在全部 Ray 节点安装/激活 |
+| recipe | 四个源码依赖、`workspace/rollout/dsv41/runtime`、启动与初始化脚本 | 运行时克隆，在全部 Ray 节点安装/激活 |
 
 基础标签来自 [verl 上游 Dockerfile](https://github.com/verl-project/verl/blob/main/docker/ascend/Dockerfile.ascend_9.1.0_a3_v0.9.1)：`swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12`。正式发布仍需固定目标架构 digest。CANN/ATB、编译器及驱动配套须验收。当前构建目标沿用 `ascend910_9382`，与上游示例的 `9392` 不同，需按实际芯片确认。
 
-镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。三个框架统一从 `dependencies/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
+镜像构建不会克隆、安装三个 AQ-MedAI fork 和上游 mbridge，也不复制 recipe runtime。三个框架统一从 `dependencies/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
 
 ## 固定框架
 
@@ -47,13 +47,13 @@ bash tools/setup_environment.sh v41
 source tools/activate.sh v41
 ```
 
-初始化先核对四个 fork 的 commit、镜像框架版本和 Engram 校验值，再执行 `pip install -e --no-deps --no-build-isolation`，最后报告依赖检查结果（声明冲突不阻断初始化）。不自动升级依赖或现场重建镜像算子。所有 Ray 节点需使用一致镜像、recipe 和路径，再按模型 README 启动训练。设备/驱动、共享内存和网络挂载需按机器配置。
+初始化先核对四个源码依赖 的 commit、镜像框架版本和 Engram 校验值，再执行 `pip install -e --no-deps --no-build-isolation`，最后报告依赖检查结果（声明冲突不阻断初始化）。不自动升级依赖或现场重建镜像算子。所有 Ray 节点需使用一致镜像、recipe 和路径，再按模型 README 启动训练。设备/驱动、共享内存和网络挂载需按机器配置。
 
 V4 使用同一镜像，运行 `bash tools/setup_sources.sh v4`、`bash tools/setup_environment.sh v4` 和 `source tools/activate.sh v4`。源码和补丁已统一，仍须分别执行 V4/V4.1 冒烟测试；源码校验不代表算子或模型兼容性验收。
 
 ## 仍待补齐
 
-1. 构建工具的 `locks/build.lock` 已生成（14 个包，固定版本和 SHA256）；[锁文件说明](locks/README.md) 提供生成命令和源码约束。仍缺 `locks/runtime.lock`：包含完整 Python 依赖、固定版本和 wheel 哈希。统一运行锁包含 uv/构建工具及四个 fork 需要的 Python 包。硬件 bootstrap 目前仅固定版本，cp312 wheel 哈希仍需补齐。 完整运行锁不再是开发构建的前置条件。
+1. 构建工具的 `locks/build.lock` 已生成（14 个包，固定版本和 SHA256）；[锁文件说明](locks/README.md) 提供生成命令和源码约束。仍缺 `locks/runtime.lock`：包含完整 Python 依赖、固定版本和 wheel 哈希。统一运行锁包含 uv/构建工具及四个源码依赖 需要的 Python 包。硬件 bootstrap 目前仅固定版本，cp312 wheel 哈希仍需补齐。 完整运行锁不再是开发构建的前置条件。
 2. FastAPI、Starlette、OpenCV、NumPy 及关联包已按固定部署版本配置显式覆盖。依赖声明差异会报告，不阻断安装；必要时使用 `--build-arg PYTHON_DEPENDENCY_MODE=no-deps` 跳过运行依赖解析。
 3. 基础镜像 digest、CANN/ATB/ABI 和 NPU 验收；公共层也尚未实测构建。镜像中缺少 Python 3.12 头文件时需补齐对应开发环境，不能安装 Ubuntu 默认的其他版本头文件代替。
 4. V4 的完整框架/算子组合与兼容性验收。

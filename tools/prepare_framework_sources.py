@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 
-def verify(root, source):
+def verify(root, source, *, tracked=False):
     ignored = {".git", "__pycache__", ".DS_Store", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
     actual_names = {
         str(p.relative_to(root))
@@ -17,6 +17,12 @@ def verify(root, source):
         and not ignored.intersection(p.relative_to(root).parts)
         and not p.name.endswith(".pyc")
     }
+    if tracked:
+        # Ignore build artifacts covered by the source repository's .gitignore.
+        names = subprocess.check_output(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"]
+        )
+        actual_names = {name.decode() for name in names.split(b"\0") if name}
     if actual_names != set(source["files"]):
         raise RuntimeError(f"Source inventory mismatch: {root}")
     for name, expected in source["files"].items():

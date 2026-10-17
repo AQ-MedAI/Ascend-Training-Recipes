@@ -1,0 +1,899 @@
+diff --git a/mbridge/core/bridge.py b/mbridge/core/bridge.py
+index 031e9228aaff131f1c1f89777e30e3ce0a15b0cb..e9a9b77e05467fd6b1517374f7ccc7ad56010d77 100644
+--- a/mbridge/core/bridge.py
++++ b/mbridge/core/bridge.py
+@@ -171,7 +171,9 @@ class Bridge(ABC):
+             # only tp_rank0/etp_rank0 load from disk, others load from tp_rank0/etp_rank0
+             to_load_from_disk = []
+             for local_name, hf_names in local_to_hf_map.items():
+-                if ".mlp.experts.linear_fc" in local_name:
++                if self._load_rank_owned_weight(model, local_name, hf_names, weights_path, check_only=True):
++                    continue
++                if ".mlp.experts.local_experts" in local_name:
+                     if self.mpu.etp_rank == 0:
+                         to_load_from_disk.extend(hf_names)
+                 else:
+@@ -191,6 +193,8 @@ class Bridge(ABC):
+ 
+             # import mcore weights
+             for local_name, hf_names in local_to_hf_map.items():
++                if self._load_rank_owned_weight(model, local_name, hf_names, weights_path):
++                    continue
+                 param = model.state_dict()[local_name]
+                 # hf format to mcore format
+                 if set(to_load_from_disk) & set(hf_names):
+@@ -203,7 +207,7 @@ class Bridge(ABC):
+                     mcore_weight = self._weight_to_mcore_format(local_name, hf_weights)
+                 else:
+                     mcore_weight = None
+-                if hf_names[0] in {"lm_head.weight", "model.embed_tokens.weight"}:
++                if hf_names[0] in {"head.weight", "model.embed_tokens.weight"}:
+                     if param.shape[0] == 1 and (
+                         mcore_weight is None or mcore_weight.shape[0] != 1
+                     ):
+@@ -211,7 +215,7 @@ class Bridge(ABC):
+                         continue
+ 
+                 param_to_load = torch.empty_like(param)
+-                if ".mlp.experts.linear_fc" in local_name:
++                if ".mlp.experts.local_experts" in local_name:
+                     # split mcore weights across etp
+                     if self.mpu.etp_rank == 0:
+                         mcore_weights_tp_split = self._weight_split_across_tp(
+@@ -222,6 +226,9 @@ class Bridge(ABC):
+                             t.to(param.device, dtype=param.dtype).contiguous()
+                             for t in mcore_weights_tp_split
+                         ]
++                        self._check_scatter_tensor_shapes(
++                            local_name, hf_names, param, mcore_weight, mcore_weights_tp_split, "etp"
++                        )
+                     else:
+                         mcore_weights_tp_split = None
+                     torch.distributed.scatter(
+@@ -241,6 +248,9 @@ class Bridge(ABC):
+                             t.to(param.device, dtype=param.dtype).contiguous()
+                             for t in mcore_weights_tp_split
+                         ]
++                        self._check_scatter_tensor_shapes(
++                            local_name, hf_names, param, mcore_weight, mcore_weights_tp_split, "tp"
++                        )
+                     else:
+                         mcore_weights_tp_split = None
+                     torch.distributed.scatter(
+@@ -252,6 +262,9 @@ class Bridge(ABC):
+                 # load
+                 param.copy_(param_to_load)
+ 
++    def _load_rank_owned_weight(self, model, name, hf_names, path, check_only=False):
++        return False
++
+     def save_weights(
+         self, models: list, weights_path: str, memory_efficient: bool = False
+     ) -> None:
+@@ -351,17 +364,22 @@ class Bridge(ABC):
+             if iter_pp_rank == self.mpu.pp_rank:
+                 try:
+                     name, param = next(model_chunk_generator)
++                    if "self_attention.attn_sink" in name:
++                        param.tensor_model_parallel=True
+                 except StopIteration:
+                     name, param = None, None
+                 name = local_to_global_map[iter_name]
+             else:
+                 name, param = None, None
+ 
++            if getattr(param, 'engram_row_sharded', False):
++                yield from self._export_rank_owned_weight(name, param)
++                continue
+             name = broadcast_str_from_megatron_pp(name)
+             broad_pp_param = broadcast_from_megatron_pp(param)
+ 
+             # EP
+-            if ".mlp.experts.linear_fc" in name and self.mpu.ep_size > 1:
++            if ".mlp.experts.local_experts" in name and self.mpu.ep_size > 1:
+                 num_experts = self.config.num_moe_experts
+                 num_experts_per_rank = num_experts // self.mpu.ep_size
+                 infer_params = [
+@@ -370,15 +388,15 @@ class Bridge(ABC):
+                 torch.distributed.all_gather(
+                     infer_params, broad_pp_param, group=self.mpu.ep_group
+                 )
+-
+-                name_prefix, local_expert_id = name.split(".weight")
++                name_left, name_right = name.split('.local_experts.')
++                local_expert_id, name_suffix = name_right.split('.', 1)
+                 local_expert_id = int(local_expert_id)
+                 global_expert_ids = [
+                     num_experts_per_rank * ep_rank + local_expert_id
+                     for ep_rank in range(self.mpu.ep_size)
+                 ]
+                 global_expert_names = [
+-                    f"{name_prefix}.weight{expert_id}"
++                    f"{name_left}.local_experts.{expert_id}.{name_suffix}"
+                     for expert_id in global_expert_ids
+                 ]
+ 
+@@ -512,12 +530,13 @@ class Bridge(ABC):
+             }
+             for k in ret.keys():
+                 v = ret[k]
+-                if ".mlp.experts.linear_fc" in v:
+-                    name_prefix, local_expert_id = v.split(".weight")
++                if ".mlp.experts.local_experts" in v:
++                    name_left, name_right = v.split('.local_experts.')
++                    local_expert_id, name_suffix = name_right.split('.', 1)
+                     global_expert_idx = local_expert_to_global_expert[
+                         int(local_expert_id)
+                     ]
+-                    ret[k] = f"{name_prefix}.weight{global_expert_idx}"
++                    ret[k] = f"{name_left}.local_experts.{global_expert_idx}.{name_suffix}"
+ 
+         return ret
+ 
+@@ -762,15 +781,29 @@ class Bridge(ABC):
+         Raises:
+             NotImplementedError: If the parameter name is unsupported
+         """
+-        # Convert weights to the target dtype if needed
+-        # This handles cases where HF weights are FP32 but model expects BF16/FP16
++        # Keep HF weights on CPU while converting them into the MCore layout.
++        # On Ascend, torch_npu's transfer_to_npu hook can route ``w.to(dtype)``
++        # through an NPU device-to-device copy if ``w`` has already been moved
++        # by an upstream loader/hook.  That may fail during checkpoint import
++        # with aclnnInplaceCopy/561103.  The later split/scatter path already
++        # moves tensors to ``param.device`` explicitly, so layout conversion is
++        # safest on CPU.
++        hf_weights = [
++            w.detach().cpu() if getattr(w, "device", None) is not None and w.device.type != "cpu" else w
++            for w in hf_weights
++        ]
++
++        # Convert weights to the target dtype if needed.
++        # This handles cases where HF weights are FP32 but model expects BF16/FP16.
++        # Integer/bool buffers (e.g. Engram original row IDs) must remain exact.
+         if (
+             hasattr(self, "dtype")
+             and self.dtype is not None
+             and "expert_bias" not in mcore_weights_name
+         ):
+             hf_weights = [
+-                w.to(self.dtype) if w.dtype != self.dtype else w for w in hf_weights
++                w.to(self.dtype) if w.is_floating_point() and w.dtype != self.dtype else w
++                for w in hf_weights
+             ]
+ 
+         if len(hf_weights) == 1:
+@@ -852,7 +885,7 @@ class Bridge(ABC):
+         if self.mpu.tp_size == 1:
+             assert len(mcore_weights) == 1
+             return mcore_weights[0]
+-        if "mlp.experts.linear_fc" in mcore_weights_name:
++        if "mlp.experts.local_experts" in mcore_weights_name:
+             assert len(mcore_weights) == self.mpu.etp_size
+         else:
+             assert len(mcore_weights) == self.mpu.tp_size
+@@ -880,7 +913,7 @@ class Bridge(ABC):
+             up = torch.cat(up_lst, dim=0)
+             ret = torch.cat((gate, up), dim=0)
+ 
+-        elif "mlp.experts.linear_fc2.weight" in mcore_weights_name:  # moe
++        elif "linear_fc2.weight" in mcore_weights_name and "local_experts" in mcore_weights_name:  # moe
+             ret = torch.cat(mcore_weights, dim=1)
+         else:
+             assert (
+@@ -928,7 +961,7 @@ class Bridge(ABC):
+             gates = gate.chunk(tp_split_size)
+             ups = up.chunk(tp_split_size)
+             ret = [torch.cat([g, u], dim=0) for g, u in zip(gates, ups)]
+-        elif "mlp.experts.linear_fc2.weight" in mcore_weights_name:  # moe
++        elif "linear_fc2.weight" in mcore_weights_name and "local_experts" in mcore_weights_name:  # moe
+             ret = mcore_weights.chunk(tp_split_size, dim=1)
+         else:
+             if param.shape == mcore_weights.shape:
+@@ -943,6 +976,27 @@ class Bridge(ABC):
+             ret = mcore_weights.chunk(tp_split_size, dim=partition_dim)
+         return ret
+ 
++    @staticmethod
++    def _check_scatter_tensor_shapes(
++        local_name: str,
++        hf_names: list[str],
++        param: torch.Tensor,
++        mcore_weight: torch.Tensor | None,
++        tensors: list[torch.Tensor] | None,
++        group_name: str,
++    ) -> None:
++        if tensors is None:
++            return
++        bad_shapes = [tuple(t.shape) for t in tensors if t.shape != param.shape]
++        if not bad_shapes:
++            return
++        mcore_shape = None if mcore_weight is None else tuple(mcore_weight.shape)
++        raise ValueError(
++            "mbridge scatter tensor shape mismatch: "
++            f"{group_name=}, {local_name=}, {hf_names=}, "
++            f"param_shape={tuple(param.shape)}, {mcore_shape=}, split_shapes={[tuple(t.shape) for t in tensors]}"
++        )
++
+     def _get_actual_hf_path(self, weight_path: str) -> str:
+         """
+         Get the actual Hugging Face path for the model weights.
+diff --git a/mbridge/core/llm_bridge.py b/mbridge/core/llm_bridge.py
+index a3667fe942a572190a43801b6ef44bd502455e8e..441e98f0f86ce1bb51e86988c59e313ea38df7ca 100644
+--- a/mbridge/core/llm_bridge.py
++++ b/mbridge/core/llm_bridge.py
+@@ -31,8 +31,8 @@ class LLMBridge(Bridge):
+         "hidden_size": "hidden_size",
+         "num_attention_heads": "num_attention_heads",
+         "num_query_groups": "num_key_value_heads",
+-        "ffn_hidden_size": "intermediate_size",
+-        "attention_dropout": "attention_dropout",
++        # "ffn_hidden_size": "intermediate_size",
++        # "attention_dropout": "attention_dropout",
+         "layernorm_epsilon": "rms_norm_eps",
+         "hidden_dropout": ("hidden_dropout", 0.0),
+         "kv_channels": ("head_dim", None),
+diff --git a/mbridge/core/safetensor_io.py b/mbridge/core/safetensor_io.py
+index 0b2e22d5fd59d62fa491163ca80d8a574ede32b2..d0036bc30744cf660ea48cf808ddf1daa84e4325 100644
+--- a/mbridge/core/safetensor_io.py
++++ b/mbridge/core/safetensor_io.py
+@@ -7,7 +7,7 @@ from typing import Generator
+ 
+ import torch
+ from safetensors import safe_open
+-from safetensors.torch import save_file
++from safetensors.torch import save as serialize
+ 
+ 
+ class SafeTensorIO:
+@@ -24,6 +24,28 @@ class SafeTensorIO:
+ 
+         self.hf_dir = hf_dir
+ 
++    def _save_file(self, states: dict[str, torch.Tensor], safetensor_file: str):
++        """Serialize in memory, then use ordinary sequential filesystem writes.
++
++        ``safetensors.serialize_file`` uses direct file operations that are not
++        supported by some shared filesystems.  The byte-oriented API produces
++        the identical safetensors format without using node-local temporary
++        files.  Write through a memoryview in chunks to avoid extra byte copies.
++        """
++        serialized = serialize(states)
++        serialized_view = memoryview(serialized)
++        try:
++            chunk_size = 16 * 1024 * 1024
++            with open(safetensor_file, "wb") as destination:
++                for offset in range(0, len(serialized_view), chunk_size):
++                    destination.write(serialized_view[offset : offset + chunk_size])
++        finally:
++            # Do not retain a complete serialized shard while the caller starts
++            # gathering tensors for the next shard.
++            serialized_view.release()
++            del serialized_view
++            del serialized
++
+     def load_some_hf_weight(self, hf_weight_names: list[str]) -> dict:
+         index = self.index
+         hf_dir = self.hf_dir
+@@ -98,7 +120,7 @@ class SafeTensorIO:
+             states = {}
+             for hf_weight_name, tensor in per_tensor_generator:
+                 states[hf_weight_name] = tensor
+-            save_file(states, safetensor_file)
++            self._save_file(states, safetensor_file)
+             return
+ 
+         filename_to_keys_map = defaultdict(set)
+@@ -111,9 +133,13 @@ class SafeTensorIO:
+                 if keys_for_file.issubset(states.keys()):
+                     to_save = {k: states[k] for k in keys_for_file}
+                     safetensor_file = os.path.join(new_hf_dir, filename)
+-                    save_file(to_save, safetensor_file)
++                    self._save_file(to_save, safetensor_file)
+                     for k in keys_for_file:
+                         del states[k]
++                    # ``states`` no longer owns these tensors, but ``to_save``
++                    # would otherwise retain the whole completed shard until a
++                    # later shard replaces this local variable.
++                    del to_save
+         if not set(states.keys()) == set(hf_shared_weight_keys):
+             warnings.warn(
+                 f"Some weights are not saved: {states.keys()} {hf_shared_weight_keys=}"
+@@ -137,15 +163,23 @@ class SafeTensorIO:
+             filename_to_keys_map[filename].add(key)
+         for hf_weight_name, tensor in per_tensor_generator:
+             tmp_filename = f"{new_hf_dir}/{hf_weight_name}.safetensors"
+-            save_file({hf_weight_name: tensor}, tmp_filename)
++            self._save_file({hf_weight_name: tensor}, tmp_filename)
+         for filename, keys_for_file in filename_to_keys_map.items():
+             states = {}
++            tmp_filenames = []
+             for key in keys_for_file:
+                 tmp_filename = f"{new_hf_dir}/{key}.safetensors"
+                 with safe_open(tmp_filename, framework="pt", device="cpu") as f:
+                     states[key] = f.get_tensor(key)
+-                    os.remove(tmp_filename)
+-            save_file(states, os.path.join(new_hf_dir, filename))
++                tmp_filenames.append(tmp_filename)
++            self._save_file(states, os.path.join(new_hf_dir, filename))
++            del states
++            # Keep the per-tensor files until the final shard is complete.  In
++            # particular, do not unlink mmap-backed inputs while they are still
++            # being serialized on a shared filesystem.
++            for tmp_filename in tmp_filenames:
++                os.remove(tmp_filename)
++            del tmp_filenames
+         return
+ 
+     def save_index(self, new_hf_dir: str):
+diff --git a/mbridge/models/__init__.py b/mbridge/models/__init__.py
+index 65b2b8ab0d18974158a286100204d7a1b9af238f..c1ac710fc47fdbeb6b83edec67e995bb06bfcc05 100644
+--- a/mbridge/models/__init__.py
++++ b/mbridge/models/__init__.py
+@@ -17,6 +17,7 @@ Classes:
+ # fmt: off
+ 
+ from .deepseek_v3 import DeepseekV3Bridge
++from .deepseek_v41 import DeepseekV41Bridge
+ from .llama import LLaMABridge
+ from .mimo import MimoBridge
+ from .mixtral import MixtralBridge
+diff --git a/mbridge/models/deepseek_v3.py b/mbridge/models/deepseek_v3.py
+index 478798d7741676d27fc4abed62bd4d23e5be975d..4b6f7588b64d549b22510c09d3bebdeb89d94126 100644
+--- a/mbridge/models/deepseek_v3.py
++++ b/mbridge/models/deepseek_v3.py
+@@ -13,79 +13,125 @@ from megatron.core.transformer import MLATransformerConfig
+ from megatron.core.transformer.enums import AttnBackend
+ 
+ from ..core import LLMBridge, register_model
++import re
+ 
+-
+-@register_model("deepseek_v3")
++@register_model(["deepseek_v3", "deepseek_v4"])
+ class DeepseekV3Bridge(LLMBridge):
+     """
+     Specific bridge implementation for DeepseekV3 models.
+     """
+-
++    # megatron to hf name
+     _DIRECT_MAPPING = {
+-        "embedding.word_embeddings.weight": "model.embed_tokens.weight",
+-        "decoder.final_layernorm.weight": "model.norm.weight",
+-        "output_layer.weight": "lm_head.weight",
++        "embedding.word_embeddings.weight": "embed.weight",
++        "final_layernorm.weight": "norm.weight",
++        "output_layer.weight": "head.weight",
++        "hc_head.hc_base": "hc_head_base",
++        "hc_head.hc_fn.weight": "hc_head_fn",
++        "hc_head.hc_scale": "hc_head_scale"
+     }
+     _MLP_MAPPING = {
+-        "mlp.linear_fc1.layer_norm_weight": [
+-            "model.layers.{layer_number}.post_attention_layernorm.weight"
+-        ],
+-        "mlp.linear_fc2.weight": ["model.layers.{layer_number}.mlp.down_proj.weight"],
+-        "mlp.shared_experts.linear_fc2.weight": [
+-            "model.layers.{layer_number}.mlp.shared_experts.down_proj.weight"
++        "pre_mlp_layernorm.weight":[
++            "layers.{layer_number}.ffn_norm.weight"
+         ],
+-        "mlp.linear_fc1.weight": [
+-            "model.layers.{layer_number}.mlp.gate_proj.weight",
+-            "model.layers.{layer_number}.mlp.up_proj.weight",
++        "mlp.router.tid2eid":[
++            "layers.{layer_number}.ffn.gate.tid2eid"
+         ],
+-        "mlp.shared_experts.linear_fc1.weight": [
+-            "model.layers.{layer_number}.mlp.shared_experts.gate_proj.weight",
+-            "model.layers.{layer_number}.mlp.shared_experts.up_proj.weight",
++        "mlp.shared_experts.linear_fc1.weight":[
++            "layers.{layer_number}.ffn.shared_experts.w1.weight",
++            "layers.{layer_number}.ffn.shared_experts.w3.weight"
+         ],
+-        "pre_mlp_layernorm.weight": [
+-            "model.layers.{layer_number}.post_attention_layernorm.weight"
++        "mlp.shared_experts.linear_fc2.weight":[
++            "layers.{layer_number}.ffn.shared_experts.w2.weight"
+         ],
+-        "mlp.router.weight": ["model.layers.{layer_number}.mlp.gate.weight"],
+-        "mlp.router.expert_bias": [
+-            "model.layers.{layer_number}.mlp.gate.e_score_correction_bias"
++        "mlp_mhc.hc_base":[
++           "layers.{layer_number}.hc_ffn_base"
++       ],
++        "mlp_mhc.hc_scale":[
++           "layers.{layer_number}.hc_ffn_scale"
++       ],
++       "mlp_mhc.hc_fn.weight":[
++           "layers.{layer_number}.hc_ffn_fn"],
++       r"mlp\.experts\.local_experts\.(\d+)\.linear_fc1\.weight": [
++        "layers.{layer_number}.ffn.experts.{expert_id}.w1.weight",
++        "layers.{layer_number}.ffn.experts.{expert_id}.w3.weight"],
++       r"mlp\.experts\.local_experts\.(\d+)\.linear_fc2\.weight":[
++            "layers.{layer_number}.ffn.experts.{expert_id}.w2.weight"
+         ],
+-        "mlp.experts.linear_fc1.weight": [
+-            "model.layers.{layer_number}.mlp.experts.{expert_id}.gate_proj.weight",
+-            "model.layers.{layer_number}.mlp.experts.{expert_id}.up_proj.weight",
+-        ],
+-        "mlp.experts.linear_fc2.weight": [
+-            "model.layers.{layer_number}.mlp.experts.{expert_id}.down_proj.weight"
++        "mlp.router.weight":[
++            "layers.{layer_number}.ffn.gate.weight"
+         ],
++        "mlp.router.expert_bias":[
++            "layers.{layer_number}.ffn.gate.bias"
++        ]
+     }
+ 
+     _ATTENTION_MAPPING = {
+-        "input_layernorm.weight": [
+-            "model.layers.{layer_number}.input_layernorm.weight"
+-        ],
+-        "self_attention.linear_proj.weight": [
+-            "model.layers.{layer_number}.self_attn.o_proj.weight"
+-        ],
+-        "self_attention.linear_q_proj.weight": [
+-            "model.layers.{layer_number}.self_attn.q_proj.weight"
++        "input_layernorm.weight":[
++            "layers.{layer_number}.attn_norm.weight"
+         ],
+-        "self_attention.linear_kv_down_proj.weight": [
+-            "model.layers.{layer_number}.self_attn.kv_a_proj_with_mqa.weight"
++        "self_attention.attn_sink": [
++            "layers.{layer_number}.attn.attn_sink"
+         ],
+-        "self_attention.linear_kv_up_proj.layer_norm_weight": [
+-            "model.layers.{layer_number}.self_attn.kv_a_layernorm.weight"
++        "self_attention.kv_layernorm.weight": [
++            "layers.{layer_number}.attn.kv_norm.weight"
+         ],
+-        "self_attention.linear_kv_up_proj.weight": [
+-            "model.layers.{layer_number}.self_attn.kv_b_proj.weight"
++        "self_attention.q_layernorm.weight": [
++            "layers.{layer_number}.attn.q_norm.weight"
+         ],
+-        "self_attention.linear_q_down_proj.weight": [
+-            "model.layers.{layer_number}.self_attn.q_a_proj.weight"
++        "self_attention.linear_kv.weight": [
++            "layers.{layer_number}.attn.wkv.weight"
+         ],
+         "self_attention.linear_q_up_proj.weight": [
+-            "model.layers.{layer_number}.self_attn.q_b_proj.weight"
+-        ],
+-        "self_attention.linear_q_up_proj.layer_norm_weight": [
+-            "model.layers.{layer_number}.self_attn.q_a_layernorm.weight"
++            "layers.{layer_number}.attn.wq_b.weight"
+         ],
++        "self_attention.linear_q.weight": [
++           "layers.{layer_number}.attn.wq_a.weight"
++       ],
++        "self_attention.linear_o_down_proj.weight": [
++           "layers.{layer_number}.attn.wo_a.weight"
++       ],
++       "self_attention.linear_o_up_proj.weight":[
++           "layers.{layer_number}.attn.wo_b.weight"
++       ],
++       "attn_mhc.hc_base":[
++           "layers.{layer_number}.hc_attn_base"
++       ],
++        "attn_mhc.hc_scale":[
++           "layers.{layer_number}.hc_attn_scale"
++       ],
++       "attn_mhc.hc_fn.weight":[
++           "layers.{layer_number}.hc_attn_fn"
++       ],
++        "self_attention.compressor.ape": [
++           "layers.{layer_number}.attn.compressor.ape"
++       ],
++        "self_attention.compressor.wkv.weight": [
++           "layers.{layer_number}.attn.compressor.wkv.weight"
++       ],
++        "self_attention.compressor.wgate.weight": [
++           "layers.{layer_number}.attn.compressor.wgate.weight"
++       ],
++        "self_attention.compressor.norm.weight": [
++           "layers.{layer_number}.attn.compressor.norm.weight"
++       ],
++        "self_attention.indexer.wq_b.weight": [
++           "layers.{layer_number}.attn.indexer.wq_b.weight"
++       ],
++        "self_attention.indexer.kv_compressor.ape": [
++           "layers.{layer_number}.attn.indexer.compressor.ape"
++       ],
++        "self_attention.indexer.kv_compressor.wkv.weight": [
++           "layers.{layer_number}.attn.indexer.compressor.wkv.weight"
++       ],
++        "self_attention.indexer.kv_compressor.wgate.weight": [
++           "layers.{layer_number}.attn.indexer.compressor.wgate.weight"
++       ],
++        "self_attention.indexer.kv_compressor.norm.weight": [
++           "layers.{layer_number}.attn.indexer.compressor.norm.weight"
++       ],
++        "self_attention.indexer.weights_proj.weight": [
++           "layers.{layer_number}.attn.indexer.weights_proj.weight"
++       ]
+     }
+ 
+     _SHARED_STATE_DICT_MAPPING = {
+@@ -115,11 +161,6 @@ class DeepseekV3Bridge(LLMBridge):
+         if "rope_scaling" in hf_config and hf_config.rope_scaling is not None:
+             mla_rope_config.update(hf_config.rope_scaling)
+         moe_layer_freq = [1] * hf_config.num_hidden_layers
+-        for i in range(
+-            min(hf_config.first_k_dense_replace, hf_config.num_hidden_layers)
+-        ):
+-            moe_layer_freq[i] = 0
+-
+         mtp_args = {}
+         if "num_nextn_predict_layers" in hf_config:
+             mtp_args["mtp_num_layers"] = hf_config.num_nextn_predict_layers
+@@ -128,14 +169,14 @@ class DeepseekV3Bridge(LLMBridge):
+         return self._build_base_config(
+             attention_backend=AttnBackend.fused,
+             layernorm_epsilon=hf_config.rms_norm_eps,
+-            ffn_hidden_size=hf_config.intermediate_size,
++            # ffn_hidden_size=hf_config.intermediate_size,
+             qk_layernorm=True,
+             # moe specific
+             moe_ffn_hidden_size=hf_config.moe_intermediate_size,
+             moe_token_dispatcher_type="alltoall",
+             moe_router_bias_update_rate=0.001,
+             moe_router_enable_expert_bias=True,
+-            moe_router_topk=hf_config.num_experts_per_tok,
++            # moe_router_topk=hf_config.num_experts_per_tok,
+             num_moe_experts=hf_config.n_routed_experts,
+             moe_shared_expert_intermediate_size=hf_config.moe_intermediate_size
+             * hf_config.n_shared_experts,
+@@ -150,10 +191,10 @@ class DeepseekV3Bridge(LLMBridge):
+             moe_layer_freq=moe_layer_freq,
+             # MLA
+             q_lora_rank=hf_config.q_lora_rank,
+-            kv_lora_rank=hf_config.kv_lora_rank,
+-            qk_head_dim=hf_config.qk_nope_head_dim,
+-            qk_pos_emb_head_dim=hf_config.qk_rope_head_dim,
+-            v_head_dim=hf_config.v_head_dim,
++            # kv_lora_rank=hf_config.kv_lora_rank,
++            # qk_head_dim=hf_config.qk_nope_head_dim,
++            # qk_pos_emb_head_dim=hf_config.qk_rope_head_dim,
++            # v_head_dim=hf_config.v_head_dim,
+             rotary_base=hf_config.rope_theta,
+             rotary_scaling_factor=mla_rope_config["factor"],
+             rope_type=mla_rope_config["type"],
+@@ -288,6 +329,7 @@ class DeepseekV3Bridge(LLMBridge):
+         elif (
+             "self_attention" in mcore_weights_name
+             or "input_layernorm.weight" in mcore_weights_name
++            or "attn_mhc" in mcore_weights_name
+         ):
+             return self._weight_name_mapping_attention(mcore_weights_name)
+         elif "mlp" in mcore_weights_name:
+@@ -324,22 +366,22 @@ class DeepseekV3Bridge(LLMBridge):
+     def _weight_name_mapping_mlp(self, name: str) -> list[str]:
+         layer_number = name.split(".")[2]
+         convert_names = []
+-        for keyword, mapping_names in self._MLP_MAPPING.items():
+-            if keyword in name:
+-                if "{expert_id}" in mapping_names[0]:
+-                    expert_id = name.split("weight")[-1]
+-                    convert_names.extend(
+-                        [
+-                            x.format(layer_number=layer_number, expert_id=expert_id)
+-                            for x in mapping_names
+-                        ]
+-                    )
+-                else:
+-                    convert_names.extend(
+-                        [x.format(layer_number=layer_number) for x in mapping_names]
+-                    )
++        for pattern, mapping_names in self._MLP_MAPPING.items():
++            regex = re.compile(pattern)
++            match = regex.search(name)
++            if match:
++                groups = match.groups()
++                for template in mapping_names:
++                    if "{expert_id}" in template:
++                        if not groups:
++                            raise ValueError(f"Pattern {pattern} matched but no capture group for expert_id")
++                        expert_id = groups[0]  #
++                        convert_names.append(template.format(layer_number=layer_number, expert_id=expert_id))
++
++                    else:
++                        convert_names.append(template.format(layer_number=layer_number))
+                 break
+-        if len(convert_names) == 0:
++        if not convert_names:
+             raise NotImplementedError(f"Unsupported parameter name: {name}")
+         return convert_names
+ 
+diff --git a/mbridge/models/deepseek_v41.py b/mbridge/models/deepseek_v41.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..056a31017bf338bded3a3384179a46f4b51f42f4
+--- /dev/null
++++ b/mbridge/models/deepseek_v41.py
+@@ -0,0 +1,141 @@
++"""V4.1 text bridge. Reuses mbridge TP/EP loading/export and MCore checkpoints."""
++import re
++from pathlib import Path
++
++import torch
++from safetensors import safe_open
++from megatron.core.transformer import TransformerConfig
++from ..core import LLMBridge, register_model
++from ..core.safetensor_io import SafeTensorIO
++from ..core.util import unwrap_model
++
++
++class V41TensorIO(SafeTensorIO):
++    def __init__(self, path, crop=None, engram_source=None):
++        super().__init__(path)
++        self.crop = Path(crop) if crop else None
++        self.engram_source = engram_source
++        if not self.index and (Path(path)/'quant_model_weights.safetensors.index.json').exists():
++            import json
++            self.index = json.loads((Path(path)/'quant_model_weights.safetensors.index.json').read_text())['weight_map']
++
++    def load_some_hf_weight(self, names):
++        output = {}
++        regular = []
++        for name in names:
++            match = re.fullmatch(r'layers\.(\d+)\.engram\.(.+)', name)
++            if match and self.crop is not None:
++                layer, suffix = match.groups()
++                with safe_open(self.crop/'engram.safetensors', framework='pt', device='cpu') as f:
++                    output[name] = f.get_tensor(layer + '.' + suffix)
++            elif match and self.engram_source:
++                from mindspeed_llm.tasks.models.transformer.deepseek41.full_engram_io import source_file
++                with safe_open(source_file(self.engram_source, name), framework='pt', device='cpu') as f:
++                    output[name] = f.get_tensor(name)
++            else:
++                regular.append(name)
++        if regular:
++            output.update(super().load_some_hf_weight(regular))
++        return output
++
++
++@register_model(['deepseek_v41', 'deepseek_v4_1'])
++class DeepseekV41Bridge(LLMBridge):
++    TransformerConfigClass = TransformerConfig
++    _CONFIG_MAPPING = {
++        'num_layers': 'num_hidden_layers', 'hidden_size': 'hidden_size',
++        'num_attention_heads': 'num_attention_heads', 'kv_channels': 'head_dim',
++        'layernorm_epsilon': 'rms_norm_eps',
++    }
++    _SHARED_STATE_DICT_MAPPING = {}
++
++    def _build_config(self):
++        from mindspeed_llm.tasks.models.transformer.deepseek41.native_config import text_config, validate
++        c = text_config(self.hf_config)
++        validate(c, tp=self.mpu.tp_size, cp=self.mpu.cp_size, pp=self.mpu.pp_size,
++                 ep=self.mpu.ep_size, etp=self.mpu.etp_size)
++        text_key = 'text_config' if hasattr(self.hf_config, 'text_config') else None
++        config = self._build_base_config(
++            text_config_key=text_key, num_query_groups=c['num_attention_heads'],
++            ffn_hidden_size=c['moe_intermediate_size'],
++            num_moe_experts=c['n_routed_experts'], moe_ffn_hidden_size=c['moe_intermediate_size'],
++            moe_shared_expert_intermediate_size=c['moe_intermediate_size'],
++            moe_router_topk=c['num_experts_per_tok'], moe_router_load_balancing_type='none',
++            moe_router_dtype='fp32', moe_aux_loss_coeff=0.0,
++            moe_shared_expert_overlap=False, moe_grouped_gemm=False,
++            moe_router_enable_expert_bias=False,  # frozen selection bias lives in V41Router
++            moe_token_dispatcher_type='alltoall',
++            hidden_dropout=0.0, attention_dropout=0.0,
++            gradient_accumulation_fusion=False, bias_activation_fusion=False,
++            recompute_granularity='full', recompute_method='uniform', recompute_num_layers=1)
++        config.v41_swiglu_limit = c['swiglu_limit']
++        config.v41_indexer_coefficient = c.get('indexer_aux_loss_coef', 0.1)
++        recompute = (config.recompute_granularity, config.recompute_method, config.recompute_num_layers)
++        if config.recompute_granularity is not None and recompute != ('full', 'uniform', 1):
++            raise ValueError(
++                'V4.1 supports full/uniform/one-layer recomputation or no recomputation; '
++                f'effective (granularity, method, num_layers)={recompute!r}. '
++                'Check mindspeed.override_transformer_config as well as llm_kwargs.'
++            )
++        return config
++
++    def _weight_name_mapping_mcore_to_hf(self, name):
++        from mindspeed_llm.tasks.models.transformer.deepseek41.native_config import checkpoint_names
++        return checkpoint_names(name)
++
++    def _get_safetensor_io(self, weights_path):
++        return V41TensorIO(self._get_actual_hf_path(weights_path), getattr(self, 'engram_crop', None), getattr(self, 'engram_source', None))
++
++    def _load_rank_owned_weight(self, model, name, hf_names, path, check_only=False):
++        if not name.endswith('.engram.embed.weight'):
++            return False
++        # Mapping names are unwrapped, while DDP/Float16Module named_parameters
++        # retain module prefixes. Match the same underlying parameter namespace.
++        param = dict(unwrap_model(model).named_parameters()).get(name)
++        if param is None or not getattr(param, 'engram_row_sharded', False):
++            raise ValueError('Missing rank-owned Engram parameter metadata: ' + name)
++        if check_only:
++            return True
++        from mindspeed_llm.tasks.models.transformer.deepseek41.full_engram_io import source_file, CHUNK_ROWS
++        key = hf_names[0]
++        root = getattr(self, 'engram_source', None) or path
++        with safe_open(source_file(root, key), framework='pt', device='cpu') as f:
++            value = f.get_slice(key)
++            if value.get_shape() != [param.engram_rows, param.engram_width] or value.get_dtype() != 'BF16':
++                raise ValueError('Engram shard source mismatch: ' + key)
++            with torch.no_grad():
++                param.zero_()
++                for start in range(param.engram_start, param.engram_end, CHUNK_ROWS):
++                    end = min(start + CHUNK_ROWS, param.engram_end)
++                    param[start-param.engram_start:end-param.engram_start].copy_(value[start:end])
++        return True
++
++    def _export_rank_owned_weight(self, name, param):
++        from mindspeed_llm.tasks.models.transformer.deepseek41.full_engram_io import chunks, chunk_name
++        import torch.distributed as dist
++        layer = int(name.split('decoder.layers.', 1)[1].split('.')[0])
++        rows, width = param.engram_rows, param.engram_width
++        size = (rows + dist.get_world_size() - 1) // dist.get_world_size()
++        # Reuse the native sender with bounded logical row chunks. No full-table
++        # gather, rank0 accumulator, disk export or new transport service.
++        for start, end in chunks(rows):
++            value = torch.empty((end-start, width), dtype=param.dtype, device=param.device)
++            for owner in range(start // size, (end-1) // size + 1):
++                lo, hi = max(start, owner*size), min(end, (owner+1)*size)
++                part = value[lo-start:hi-start]  # Contiguous destination view; broadcast directly into the chunk.
++                if dist.get_rank() == owner:
++                    # Export is a snapshot, not a differentiable broadcast. Detach
++                    # before copying so the temporary does not acquire CopyBackwards.
++                    part.copy_(param[lo-owner*size:hi-owner*size].detach())
++                dist.broadcast(part, src=owner)
++            yield chunk_name(layer, start, end), value
++
++    def _model_provider(self, post_model_creation_callbacks=(), **kwargs):
++        from mindspeed_llm.tasks.models.transformer.deepseek41.native_model import model_provider
++        def provide(pre_process=True, post_process=True, **unused):
++            model = model_provider(pre_process, post_process, config=self.config,
++                                   hf_config=self.hf_config, **kwargs)
++            for callback in post_model_creation_callbacks:
++                callback(model)
++            return model
++        return provide
+diff --git a/mbridge/models/deepseek_v41_mapping.py b/mbridge/models/deepseek_v41_mapping.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..304bfebaeea855015f8b3e9d2ad9753a19f138f9
+--- /dev/null
++++ b/mbridge/models/deepseek_v41_mapping.py
+@@ -0,0 +1,115 @@
++"""V4.1 attention/mHC mapping contract, not a registered or complete bridge.
++
++Source namespace follows workspace/inference/model.py, NOT an asserted external
++HF checkpoint format. Shapes are unsharded logical weights. No quantization,
++TP slicing, MoE/Engram/vision/head conversion or real checkpoint loading here.
++Destination namespace is the proposed V4.1 layer contract, aligned with existing
++MindSpeed common attention names; its Megatron runtime is not yet wired. single_rank_adapter_mappings separately
++targets the executable standalone adapter namespace.
++"""
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class WeightMapping:
++    source: str
++    destination: str
++    shape: tuple[int, ...]
++
++
++def attention_mhc_mappings(config, plan):
++    d, h, hd = config["dim"], config["n_heads"], config["head_dim"]
++    qr, groups, out_rank = config["q_lora_rank"], config["o_groups"], config["o_lora_rank"]
++    ih, idim, hc = config["index_n_heads"], config["index_head_dim"], config["hc_mult"]
++    if min(d, h, hd, qr, groups, out_rank, ih, idim, hc) <= 0 or h % groups:
++        raise ValueError("positive dimensions and n_heads divisible by o_groups are required")
++    src = f"layers.{plan.layer_id}."
++    dst = f"decoder.layers.{plan.layer_id}."
++    entries = []
++
++    def add(source, destination, shape):
++        entries.append(WeightMapping(src + source, dst + destination, tuple(shape)))
++
++    for source, dest, shape in (
++        ("attn_norm.weight", "input_layernorm.weight", (d,)),
++        ("ffn_norm.weight", "pre_mlp_layernorm.weight", (d,)),
++        ("attn.attn_sink", "self_attention.attn_sink", (h,)),
++        ("attn.wq_a.weight", "self_attention.linear_q.weight", (qr, d)),
++        ("attn.q_norm.weight", "self_attention.q_layernorm.weight", (qr,)),
++        ("attn.wq_b.weight", "self_attention.linear_q_up_proj.weight", (h * hd, qr)),
++        ("attn.wkv.weight", "self_attention.linear_kv.weight", (hd, d)),
++        ("attn.kv_norm.weight", "self_attention.kv_layernorm.weight", (hd,)),
++        ("attn.wo_a.weight", "self_attention.linear_o_down_proj.weight", (groups * out_rank, h * hd // groups)),
++        ("attn.wo_b.weight", "self_attention.linear_o_up_proj.weight", (d, groups * out_rank)),
++    ):
++        add(source, dest, shape)
++    for source, destination in (("attn", "attn_mhc"), ("ffn", "mlp_mhc")):
++        mix = (2 + hc) * hc
++        add(f"hc_{source}_fn", f"{destination}.hc_fn.weight", (mix, hc * d))
++        add(f"hc_{source}_base", f"{destination}.hc_base", (mix,))
++        add(f"hc_{source}_scale", f"{destination}.hc_scale", (3,))
++    if plan.owns_kv:
++        add("attn.compressor.wkv.weight", "self_attention.compressor.wkv.weight", (hd, d))
++        add("attn.compressor.norm.weight", "self_attention.compressor.norm.weight", (hd,))
++        if plan.ratio == 2:
++            add("attn.compressor.wgate.weight", "self_attention.compressor.wgate.weight", (hd, d))
++    if plan.owns_indexer:
++        add("attn.indexer.wq_b.weight", "self_attention.indexer.wq_b.weight", (ih * idim, qr))
++        add("attn.indexer.weights_proj.weight", "self_attention.indexer.weights_proj.weight", (ih, d))
++        if plan.owns_kv:
++            add("attn.indexer.wk.weight", "self_attention.indexer.wk.weight", (idim, hd))
++            add("attn.indexer.k_norm.weight", "self_attention.indexer.k_norm.weight", (idim,))
++    return tuple(entries)
++
++
++def validate_source_shapes(mappings, shapes):
++    """Check scoped logical source shapes without allocating model parameters.
++
++    shapes maps names to dimension sequences (e.g. from checkpoint headers).
++    Extra checkpoint keys outside this mapping scope are intentionally ignored.
++    """
++    errors = []
++    for entry in mappings:
++        if entry.source not in shapes:
++            errors.append(f"missing {entry.source}")
++        elif tuple(shapes[entry.source]) != entry.shape:
++            errors.append(f"{entry.source}: expected {entry.shape}, got {tuple(shapes[entry.source])}")
++    if errors:
++        raise ValueError("\n".join(errors))
++
++
++def single_rank_adapter_mappings(config, plan):
++    """Executable attention/mHC scope for SingleRankTrainingAdapter.
++
++    Keep the proposed Megatron namespace above unchanged. This separate mapping
++    targets actual adapter parameters; FFN/final norm and other model weights
++    are deliberately outside its scope. Source format is still local inference.
++    """
++    replacements = {
++        'attn_norm.weight': 'attn_norm.weight',
++        'ffn_norm.weight': 'ffn_norm.weight',
++        'attn.attn_sink': 'attention.geometry.attn_sink',
++        'attn.wq_a.weight': 'attention.geometry.wq_a.weight',
++        'attn.q_norm.weight': 'attention.geometry.q_norm.weight',
++        'attn.wq_b.weight': 'attention.geometry.wq_b.weight',
++        'attn.wkv.weight': 'attention.geometry.wkv.weight',
++        'attn.kv_norm.weight': 'attention.geometry.kv_norm.weight',
++        'attn.wo_a.weight': 'attention.geometry.wo_a.weight',
++        'attn.wo_b.weight': 'attention.geometry.wo_b.weight',
++        'attn.compressor.norm.weight': 'attention.compressor.norm_weight',
++    }
++    for kind in ('attn', 'ffn'):
++        replacements[f'hc_{kind}_fn'] = f'{kind}_mhc.hc_fn.weight'
++        replacements[f'hc_{kind}_base'] = f'{kind}_mhc.hc_base'
++        replacements[f'hc_{kind}_scale'] = f'{kind}_mhc.hc_scale'
++    source_prefix = f'layers.{plan.layer_id}.'
++    entries = []
++    for entry in attention_mhc_mappings(config, plan):
++        suffix = entry.source[len(source_prefix):]
++        target = replacements.get(suffix)
++        if target is None and suffix.startswith(('attn.compressor.', 'attn.indexer.')):
++            target = 'attention.' + suffix[len('attn.'):]
++        if target is None:
++            raise ValueError(f'unmapped adapter parameter: {entry.source}')
++        entries.append(WeightMapping(entry.source, f'backbone.layers.{plan.layer_id}.{target}', entry.shape))
++    return tuple(entries)
+diff --git a/mbridge/models/ext/deepseek_v3/dequant_fp8_safetensor_io.py b/mbridge/models/ext/deepseek_v3/dequant_fp8_safetensor_io.py
+index 5012942c82914384d02cb9e8c4d7c40dd8ebd600..994240992ad976f69f29fcd6b5ffafd7c0769362 100644
+--- a/mbridge/models/ext/deepseek_v3/dequant_fp8_safetensor_io.py
++++ b/mbridge/models/ext/deepseek_v3/dequant_fp8_safetensor_io.py
+@@ -31,7 +31,7 @@ class DequantFP8SafeTensorIO(SafeTensorIO):
+             file_to_weight_map[filename].append(name)
+         for filename, weight_names in file_to_weight_map.items():
+             safetensor_file = os.path.join(hf_dir, filename)
+-            with safe_open(safetensor_file, framework="pt", device="cuda") as f:
++            with safe_open(safetensor_file, framework="pt", device="npu") as f:
+                 for name in weight_names:
+                     weight = f.get_tensor(name)
+                     scale_inv_name = f"{name}_scale_inv"
+@@ -48,7 +48,7 @@ class DequantFP8SafeTensorIO(SafeTensorIO):
+                                         hf_dir, weight_to_file_map[scale_inv_name]
+                                     ),
+                                     framework="pt",
+-                                    device="cuda",
++                                    device="npu",
+                                 ) as f2:
+                                     scale_inv = f2.get_tensor(scale_inv_name)
+                             ret[name] = weight_dequant(weight, scale_inv)

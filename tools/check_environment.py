@@ -9,6 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from patched_sources import is_prepared, load_source
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -22,6 +24,10 @@ def main():
         actual = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
         if actual != expected:
             raise SystemExit(f"{name}: expected {expected}, found {actual}; run setup_sources.sh {args.profile}")
+        if component.get("source_manifest"):
+            source, _ = load_source(root, name, component, args.profile)
+            if not is_prepared(checkout, source):
+                raise SystemExit(f"{name}: managed patch is missing; run setup_sources.sh {args.profile}")
     report_dir = Path(os.environ.get("V41_IMAGE_METADATA", "/opt/ascend-training/manifest"))
     receipt = report_dir / "frameworks.json"
     if not receipt.is_file():
