@@ -131,5 +131,31 @@ class PatchSequenceTest(unittest.TestCase):
             self.assertFalse((base / "bad-patch/framework").exists())
 
 
+class FetchRetryTest(unittest.TestCase):
+    def test_transient_failure_retries_exact_commit(self):
+        from unittest.mock import patch
+
+        failure = subprocess.CalledProcessError(128, ["git", "fetch"])
+        with patch.object(module.subprocess, "check_call", side_effect=[failure, None]) as call:
+            with patch.object(module.time, "sleep") as sleep:
+                module.fetch_commit(Path("/tmp/source"), "abc123")
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_args_list[0], call.call_args_list[1])
+        self.assertIn("http.version=HTTP/1.1", call.call_args.args[0])
+        self.assertEqual(call.call_args.args[0][-1], "abc123")
+        sleep.assert_called_once_with(5)
+
+    def test_exhausted_retries_raise(self):
+        from unittest.mock import patch
+
+        failure = subprocess.CalledProcessError(128, ["git", "fetch"])
+        with patch.object(module.subprocess, "check_call", side_effect=failure) as call:
+            with patch.object(module.time, "sleep") as sleep:
+                with self.assertRaises(subprocess.CalledProcessError):
+                    module.fetch_commit(Path("/tmp/source"), "abc123")
+        self.assertEqual(call.call_count, 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [5, 10])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -146,3 +146,5 @@ python docker/v41/tests/check_v41_frontend_cpu.py --framework-root /opt/ascend-t
 ```
 
 This check loads the real source cache classes with device-facing imports stubbed. It does not load or test the native kernels.
+
+框架源码的 Git 拉取使用 HTTP/1.1，失败后最多尝试三次（间隔 5、10 秒），仍校验固定 commit 和完整源码。若该构建步骤最终失败，重新构建会重新执行整步源码准备；同一步内已下载的框架不会作为成功 Docker 层保留。此前已成功的构建层可继续使用缓存。

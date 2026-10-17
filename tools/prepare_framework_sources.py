@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -77,6 +78,33 @@ def verify(root, source, *, tracked=False):
             raise RuntimeError(f"Source checksum or mode mismatch: {path}")
 
 
+def fetch_commit(target, commit):
+    """Retry shallow fetches without relaxing commit or source verification."""
+    command = [
+        "git",
+        "-C",
+        str(target),
+        "-c",
+        "http.version=HTTP/1.1",
+        "fetch",
+        "--depth=1",
+        "--no-tags",
+        "origin",
+        commit,
+    ]
+    for attempt in range(1, 4):
+        print(f"Fetching {target.name} @ {commit} (attempt {attempt}/3)", flush=True)
+        try:
+            subprocess.check_call(command)
+            return
+        except subprocess.CalledProcessError:
+            if attempt == 3:
+                raise
+            delay = 5 * attempt
+            print(f"Fetch failed; retrying in {delay}s", flush=True)
+            time.sleep(delay)
+
+
 def prepare(root, manifest_path, profile=None):
     manifest = json.loads(manifest_path.read_text())
     for name, source in manifest_sources(manifest, profile).items():
@@ -96,7 +124,7 @@ def prepare(root, manifest_path, profile=None):
 
         git("init", "-q")
         git("remote", "add", "origin", source["repository"])
-        git("fetch", "--depth=1", "origin", source["commit"])
+        fetch_commit(target, source["commit"])
         git("checkout", "--detach", "FETCH_HEAD")
         if git("rev-parse", "HEAD").strip() != source["commit"]:
             raise RuntimeError(f"Unexpected base commit: {name}")
