@@ -1,4 +1,4 @@
-# Dependency declarations from verl-project/verl @ 809f2d8f59910dfd3a96745b68119829650250a0 + v4.patch + v41.patch
+# Dependency declarations from verl-project/verl @ 809f2d8f59910dfd3a96745b68119829650250a0 + v4.patch + v41.patch + entrypoint.patch
 accelerate
 codetiming
 datasets

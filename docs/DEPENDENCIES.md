@@ -10,8 +10,8 @@
 | v4 | [MindSpeed-LLM](https://github.com/Ascend/MindSpeed-LLM) | 上游 + common.patch + v41.patch | `53ff1095801f9ce14b14be3e62739e742f8b9067` |
 | v41 | [mbridge](https://github.com/ISEEKYAN/mbridge) | 上游 v0.15.1 + patch | `0cd4ae23f2425da77a80cb3f517828452fa8e984` |
 | v4 | [mbridge](https://github.com/ISEEKYAN/mbridge) | 上游 v0.15.1 + patch | `0cd4ae23f2425da77a80cb3f517828452fa8e984` |
-| v41 | [verl](https://github.com/verl-project/verl) | 上游 + v4.patch + v41.patch | `809f2d8f59910dfd3a96745b68119829650250a0` |
-| v4 | [verl](https://github.com/verl-project/verl) | 上游 + v4.patch + v41.patch | `809f2d8f59910dfd3a96745b68119829650250a0` |
+| v41 | [verl](https://github.com/verl-project/verl) | 上游 + v4.patch + v41.patch + entrypoint.patch | `809f2d8f59910dfd3a96745b68119829650250a0` |
+| v4 | [verl](https://github.com/verl-project/verl) | 上游 + v4.patch + v41.patch + entrypoint.patch | `809f2d8f59910dfd3a96745b68119829650250a0` |
 | k26 | [verl](https://github.com/verl-project/verl) | 上游 + k26.patch | `bee9f6f4bb1de784781e296f165b4c22d6c26cc1` |
 
 复现实验应固定 commit，而非跟随分支最新版本。机器可读版本见 [registry.json](../dependencies/registry.json)。
@@ -32,7 +32,7 @@ mbridge 的子模块引用记录上游基线，`setup_sources.sh` 自动校验�
 
 ## V4 与 V4.1
 
-V4/V4.1 共用四个依赖的最终源码。verl 先应用 `v4.patch` 再叠加 `v41.patch`；MindSpeed 和 MindSpeed-LLM 均应用公共补丁及 V4.1 增量。模型架构和训练参数决定执行路径。共享 optimizer/checkpoint 接口仍需与匹配的 Megatron-LM 同时部署。
+V4/V4.1 共用四个依赖的最终源码。verl 先应用 `v4.patch` 再叠加 `v41.patch` 和入口路径修复 `entrypoint.patch`；MindSpeed 和 MindSpeed-LLM 均应用公共补丁及 V4.1 增量。模型架构和训练参数决定执行路径。共享 optimizer/checkpoint 接口仍需与匹配的 Megatron-LM 同时部署。
 
 V4.1 rollout 源码：
 

@@ -1,0 +1,11 @@
+--- a/verl/workers/engine/mindspeed/transformer_impl.py
++++ b/verl/workers/engine/mindspeed/transformer_impl.py
+@@ -122,7 +122,7 @@
+                 max_sequence_length=options.get('seq_length', 2048),
+             )
+         else:
+-            from mindspeed_llm.pretrain_deepseek4 import model_provider
++            from pretrain_deepseek4 import model_provider
+             gpt_model_provider = model_provider
+         # For forward_only, we don't need optimizer, lr_scheduler, checkpoint_mananager
+         if self.engine_config.forward_only:
