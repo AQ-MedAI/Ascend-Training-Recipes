@@ -83,8 +83,8 @@ expected.update({'numpy': '1.26.4', 'transformers': '5.14.1', 'fastapi': '0.123.
 assert all(packages.get(k) == v for k,v in expected.items()), packages
 registry = json.loads((root/'registry.json').read_text())['rollout']['v41']
 receipt = {'profile':'v4-v41', 'python_environment':'single', 'vllm':registry['vllm']['commit'], 'vllm-ascend':registry['vllm_ascend']['commit'],
-           'megatron':json.loads((root/'sources/framework-sources.json').read_text())['sources']['Megatron-LM']}
-receipt['sources'] = json.loads((root/'sources/framework-sources.json').read_text())
+           'megatron':json.loads((root/'dependencies/framework-sources.json').read_text())['sources']['Megatron-LM']}
+receipt['sources'] = json.loads((root/'dependencies/framework-sources.json').read_text())
 (manifest/'frameworks.json').write_text(json.dumps(receipt, indent=2)+'\n')
 PY
 
@@ -97,7 +97,10 @@ build = Path('/tmp/ascend-image-build')
 root = Path('/opt/ascend-training')
 for name in ('registry.json', 'native-dependencies.json', 'Megatron-LM-LICENSE'):
     shutil.copy2(build / name, root / 'manifest' / name)
-shutil.copytree(build / 'sources', root / 'manifest/sources', dirs_exist_ok=True)
+# Preserve the same relative layout so the receipt can reconstruct sources too.
+shutil.copytree(build / 'dependencies', root / 'manifest/dependencies', dirs_exist_ok=True)
+shutil.copytree(build / 'patches', root / 'manifest/patches', dirs_exist_ok=True)
+shutil.copytree(build / 'tools', root / 'manifest/tools', dirs_exist_ok=True)
 workspace = root / 'workspace'
 mhc = workspace / 'rollout/dsv41/build-src/mhc-premix'
 # Preserve installed operators and Python wrappers; remove only build inputs.

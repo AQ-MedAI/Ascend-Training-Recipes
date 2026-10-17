@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    "framework_sources", Path(__file__).resolve().parents[1] / "prepare_framework_sources.py"
+    "framework_sources", Path(__file__).resolve().parents[3] / "tools/prepare_framework_sources.py"
 )
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
@@ -50,12 +50,29 @@ class SourceVerificationTest(unittest.TestCase):
                 module.verify(root, expected)
 
 
+class ManifestIntegrityTest(unittest.TestCase):
+    def test_registered_patch_checksums(self):
+        root = Path(__file__).resolve().parents[3]
+        manifest_path = root / "dependencies/framework-sources.json"
+        manifest = json.loads(manifest_path.read_text())
+        for name, source in manifest["sources"].items():
+            for key in ("patch", "backport_patch"):
+                if key not in source:
+                    continue
+                with self.subTest(framework=name, patch=key):
+                    patch = (manifest_path.parent / source[key]).resolve()
+                    self.assertTrue(patch.is_relative_to(root.resolve() / "patches"))
+                    self.assertEqual(hashlib.sha256(patch.read_bytes()).hexdigest(), source[key + "_sha256"])
+
+
 class PatchSequenceTest(unittest.TestCase):
     def test_local_commit_reference_and_backport_are_verified(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             upstream = base / "upstream"
             upstream.mkdir()
+            (base / "patches").mkdir()
+            (base / "dependencies").mkdir()
 
             def git(*args):
                 return subprocess.check_output(["git", "-C", str(upstream), *args], text=True)
@@ -75,11 +92,11 @@ class PatchSequenceTest(unittest.TestCase):
             commit = git("rev-parse", "HEAD").strip()
             (upstream / "model.py").write_text("v4\n")
             local_patch = git("diff", "--binary")
-            (base / "local.patch").write_text(local_patch)
+            (base / "patches/local.patch").write_text(local_patch)
             git("add", ".")
             (upstream / "model.py").write_text("v4 and v41\n")
             backport = git("diff", "--binary")
-            (base / "backport.patch").write_text(backport)
+            (base / "patches/backport.patch").write_text(backport)
 
             def inventory(content):
                 return {
@@ -92,14 +109,14 @@ class PatchSequenceTest(unittest.TestCase):
             source = {
                 "repository": str(upstream),
                 "commit": commit,
-                "patch": "local.patch",
+                "patch": "../patches/local.patch",
                 "patch_sha256": hashlib.sha256(local_patch.encode()).hexdigest(),
-                "backport_patch": "backport.patch",
+                "backport_patch": "../patches/backport.patch",
                 "backport_patch_sha256": hashlib.sha256(backport.encode()).hexdigest(),
                 "reference_files": inventory("v4\n"),
                 "files": inventory("v4 and v41\n"),
             }
-            manifest = base / "manifest.json"
+            manifest = base / "dependencies/framework-sources.json"
             manifest.write_text(json.dumps({"sources": {"framework": source}}))
             module.prepare(base / "output", manifest)
             self.assertEqual((base / "output/framework/model.py").read_text(), "v4 and v41\n")
@@ -108,7 +125,7 @@ class PatchSequenceTest(unittest.TestCase):
             manifest.write_text(json.dumps({"sources": {"framework": source}}))
             with self.assertRaisesRegex(RuntimeError, "checksum or mode"):
                 module.prepare(base / "bad-reference", manifest)
-            (base / "backport.patch").write_text(backport + "tampered")
+            (base / "patches/backport.patch").write_text(backport + "tampered")
             with self.assertRaisesRegex(RuntimeError, "Patch checksum"):
                 module.prepare(base / "bad-patch", manifest)
             self.assertFalse((base / "bad-patch/framework").exists())

@@ -6,7 +6,7 @@
     "Megatron-LM": {
       "repository": "https://github.com/NVIDIA/Megatron-LM.git",
       "commit": "a845aa7e12b3a117e24c2352b9e3e60bad2e3a17",
-      "patch": "megatron-lm-local.patch",
+      "patch": "../patches/megatron-lm/megatron-lm-local.patch",
       "patch_sha256": "7d8603d773976b9cf7d15aa731aef1577309fd2073a99ba520dd649b5a56bf1a",
       "files": {
         ".flake8": {
@@ -5706,7 +5706,7 @@
     "vllm": {
       "repository": "https://github.com/vllm-project/vllm.git",
       "commit": "0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665",
-      "patch": "vllm-local.patch",
+      "patch": "../patches/vllm/vllm-local.patch",
       "patch_sha256": "11439a43ca3085f5682c6b8c12ec21f47c316c0b8fe9e6e6e8cd4105e4399496",
       "files": {
         ".git-blame-ignore-revs": {
@@ -49276,13 +49276,13 @@
           "executable": false
         }
       },
-      "backport_patch": "vllm-v41-backport.patch",
+      "backport_patch": "../patches/vllm/vllm-v41-backport.patch",
       "backport_patch_sha256": "83de7f4ad8dc0416c4f65f52810058197fcfa4c209f56bcda263895bfd8c49ec"
     },
     "vllm-ascend": {
       "repository": "https://github.com/vllm-project/vllm-ascend.git",
       "commit": "23e286f9f4a7de13aa192c43ba894cf4e2ceabdb",
-      "patch": "vllm-ascend-local.patch",
+      "patch": "../patches/vllm-ascend/vllm-ascend-local.patch",
       "patch_sha256": "02441b32471900b8259e3c079bd156b4f02ebab574d4c1b8ac9e34cb5fa90b48",
       "files": {
         "README.zh.md": {
@@ -74384,7 +74384,7 @@
           "executable": false
         }
       },
-      "backport_patch": "vllm-ascend-v41-backport.patch",
+      "backport_patch": "../patches/vllm-ascend/vllm-ascend-v41-backport.patch",
       "backport_patch_sha256": "ad55bd871ca8250456a579b20ce116da53ce242681191c0c4b83c896afc365dd"
     }
   },

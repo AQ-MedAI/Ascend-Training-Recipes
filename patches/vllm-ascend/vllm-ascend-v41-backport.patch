@@ -67190,8 +67190,8 @@ index 0f9c80ac3f87c1a1f2b42900f4a43fef876da510..ce6a3a3256ee1e6f51e7d4c8c92d6882
  #include "batch_matmul_transpose/batch_matmul_transpose_torch_adpt.h"
 @@ -2206,6 +2208,141 @@ std::vector<int64_t> get_npu_storage_shape(const at::Tensor& tensor)
  }
-
-
+ 
+ 
 +at::Tensor npu_quant_lightning_indexer_v2_metadata_npu(
 +    int64_t num_heads_q, int64_t num_heads_k, int64_t head_dim, int64_t topk, int64_t quant_mode,
 +    const c10::optional<at::Tensor> &cu_seqlens_q, const c10::optional<at::Tensor> &cu_seqlens_k,
@@ -67328,7 +67328,7 @@ index 0f9c80ac3f87c1a1f2b42900f4a43fef876da510..ce6a3a3256ee1e6f51e7d4c8c92d6882
 +}
 +
  } // namespace vllm_ascend
-
+ 
  #ifdef ASCEND_PLATFORM_310P
 @@ -2254,6 +2391,70 @@ TORCH_LIBRARY_EXPAND(CONCAT(_C, _ascend), ops)
  // Pybind on other platform
@@ -67398,7 +67398,7 @@ index 0f9c80ac3f87c1a1f2b42900f4a43fef876da510..ce6a3a3256ee1e6f51e7d4c8c92d6882
 +    );
 +    ops.impl("npu_scatter_nd_update_sk", torch::kPrivateUse1, &vllm_ascend::npu_scatter_nd_update_sk);
 +
-
+ 
      // vLLM-Ascend custom ops
      // Gemma RmsNorm
 diff --git a/csrc/torch_binding_meta.cpp b/csrc/torch_binding_meta.cpp
@@ -67406,9 +67406,9 @@ index bfd5793070be79abb12b099eb422c88c8439ce23..2eeaba56bd864f4dee727c34d4dd2f75
 --- a/csrc/torch_binding_meta.cpp
 +++ b/csrc/torch_binding_meta.cpp
 @@ -1756,6 +1756,152 @@ void store_kv_block(
-
- }
-
+ 
+ } 
+ 
 +at::Tensor npu_quant_lightning_indexer_v2_metadata_meta(
 +    int64_t num_heads_q, int64_t num_heads_k, int64_t head_dim, int64_t topk, int64_t quant_mode,
 +    const c10::optional<at::Tensor> &cu_seqlens_q, const c10::optional<at::Tensor> &cu_seqlens_k,
@@ -67557,7 +67557,7 @@ index bfd5793070be79abb12b099eb422c88c8439ce23..2eeaba56bd864f4dee727c34d4dd2f75
 +
  } // namespace meta
  } // namespace vllm_ascend
-
+ 
 @@ -1779,6 +1925,12 @@ TORCH_LIBRARY_IMPL_EXPAND(CONCAT(_C, _ascend), Meta, ops) {
  // Pybind on other platform
  namespace {
@@ -68675,7 +68675,7 @@ index dda80f68c8cb22813215eb883951c2e50d8cd325..40ce7f7036dc25f43c8be7338cc9c57a
 +        if self.engram_storage not in ("bf16", "int8", "fp8", "mxfp8"):
 +            raise ValueError("Unsupported Engram storage format")
          self._check_mooncake_c8_kv_cache_quant(vllm_config)
-
+ 
          xlite_graph_config = additional_config.get("xlite_graph_config", {})
 diff --git a/vllm_ascend/attention/context_parallel/dsa_v41_cp.py b/vllm_ascend/attention/context_parallel/dsa_v41_cp.py
 new file mode 100644
@@ -70904,8 +70904,8 @@ index bd47eec5ecd6c0bc9e662ef915ab9dc1894f8028..97cab715efa0d711a593fc4a0299265a
 --- a/vllm_ascend/core/kv_cache_interface.py
 +++ b/vllm_ascend/core/kv_cache_interface.py
 @@ -303,6 +303,20 @@ class AscendSlidingWindowMLASpec(SlidingWindowMLASpec):
-
-
+ 
+ 
  def register_ascend_kv_cache_specs() -> None:
 +    from vllm.v1.core.single_type_kv_cache_manager import FullAttentionManager
 +    from vllm_ascend.core.circular_buffer import AscendCircularBufferManager
@@ -71126,15 +71126,15 @@ index 763729fad616b13d0a88f535ba22f88c024c46da..809108809eaa1eb279e767f217dcde50
 --- a/vllm_ascend/models/__init__.py
 +++ b/vllm_ascend/models/__init__.py
 @@ -2,6 +2,10 @@ from vllm import ModelRegistry
-
-
+ 
+ 
  def register_model():
 +    for architecture in ("DeepseekV41ForCausalLM", "DeepseekV41ForConditionalGeneration"):
 +        ModelRegistry.register_model(
 +            architecture, "vllm_ascend.models.deepseek_v41.vl_model:AscendDeepseekV41ForConditionalGeneration"
 +        )
      ModelRegistry.register_model("DeepseekV4ForCausalLM", "vllm_ascend.models.deepseek_v4:AscendDeepseekV4ForCausalLM")
-
+ 
      ModelRegistry.register_model("DeepSeekV4MTPModel", "vllm_ascend.models.deepseek_v4_mtp:DeepSeekV4MTP")
 diff --git a/vllm_ascend/models/common/ops/sequence_parallel.py b/vllm_ascend/models/common/ops/sequence_parallel.py
 new file mode 100644
@@ -71213,8 +71213,8 @@ index 0a5efce02380e4e2f2419aa17dbc62d73503adcc..d33f3874636c6790977c0682e16b1087
 --- a/vllm_ascend/models/deepseek_v4.py
 +++ b/vllm_ascend/models/deepseek_v4.py
 @@ -707,6 +707,8 @@ class Compressor(nn.Module):
-
-
+ 
+ 
  class DeepseekV4Attention(nn.Module):
 +    swa_cache_cls = AscendDeepseekV4SWACache
 +
@@ -71222,7 +71222,7 @@ index 0a5efce02380e4e2f2419aa17dbc62d73503adcc..d33f3874636c6790977c0682e16b1087
          self,
          vllm_config: VllmConfig,
 @@ -853,7 +855,7 @@ class DeepseekV4Attention(nn.Module):
-
+ 
          ascend_device_type = get_ascend_device_type()
          k_dtype = torch.float8_e4m3fn if ascend_device_type == AscendDeviceType.A5 else torch.bfloat16
 -        swa_cache_layer = AscendDeepseekV4SWACache(
@@ -71231,8 +71231,8 @@ index 0a5efce02380e4e2f2419aa17dbc62d73503adcc..d33f3874636c6790977c0682e16b1087
              window_size=self.window_size,
              dtype=k_dtype,
 @@ -910,6 +912,9 @@ class DeepseekV4Attention(nn.Module):
-
-
+ 
+ 
  class DeepseekV2DecoderLayer(nn.Module):
 +    attention_cls = DeepseekV4Attention
 +    mlp_cls = DeepseekV4MoE
@@ -71243,16 +71243,16 @@ index 0a5efce02380e4e2f2419aa17dbc62d73503adcc..d33f3874636c6790977c0682e16b1087
 @@ -934,7 +939,7 @@ class DeepseekV2DecoderLayer(nn.Module):
          self.layer_idx = layer_idx
          self.norm_eps = config.rms_norm_eps
-
+ 
 -        attn_cls = DeepseekV4Attention
 +        attn_cls = self.attention_cls
-
+ 
          self.self_attn = attn_cls(
              vllm_config=vllm_config,
 @@ -946,7 +951,7 @@ class DeepseekV2DecoderLayer(nn.Module):
              topk_indices_buffer=topk_indices_buffer,
          )
-
+ 
 -        self.mlp = DeepseekV4MoE(
 +        self.mlp = self.mlp_cls(
              config=config,
@@ -71263,7 +71263,7 @@ index 0a5efce02380e4e2f2419aa17dbc62d73503adcc..d33f3874636c6790977c0682e16b1087
  class DeepseekV4Model(nn.Module):
      fall_back_to_pt_during_load = False
 +    decoder_layer_cls = DeepseekV2DecoderLayer
-
+ 
      def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
          super().__init__()
 @@ -1042,7 +1048,7 @@ class DeepseekV4Model(nn.Module):
@@ -71274,7 +71274,7 @@ index 0a5efce02380e4e2f2419aa17dbc62d73503adcc..d33f3874636c6790977c0682e16b1087
 +            lambda prefix: self.decoder_layer_cls(vllm_config, prefix, topk_indices_buffer=topk_indices_buffer),
              prefix=f"{prefix}.layers",
          )
-
+ 
 diff --git a/vllm_ascend/models/deepseek_v41/README.md b/vllm_ascend/models/deepseek_v41/README.md
 new file mode 100644
 index 0000000000000000000000000000000000000000..854c50a9b55611e36321d9053cccd6a1cd655d24
@@ -75168,7 +75168,7 @@ index 5cbe910a9a9d20670d1f8f4b36d660d634a61da0..c2c709161e266bab5490ddef8cc19172
 --- a/vllm_ascend/ops/rope_dsv4.py
 +++ b/vllm_ascend/ops/rope_dsv4.py
 @@ -300,3 +300,23 @@ class ComplexExpRotaryEmbedding(nn.Module):
-
+ 
      def extra_repr(self) -> str:
          return f"layername={self.layername}, rotary_dim={self.rotary_dim}"
 +
@@ -77752,7 +77752,7 @@ index b56a03e0139cbee591a3d8556be9a7b926123ac9..ac5d90dbc846eb89d6c31d7599020d24
 @@ -26,6 +26,12 @@ from vllm.v1.kv_cache_interface import (
      UniformTypeKVCacheSpecs,
  )
-
+ 
 +from vllm_ascend.core.deepseek_v41 import (
 +    allocate_cache_config as allocate_v41_cache_config,
 +    group_cache_specs as group_v41_cache_specs,
@@ -77760,8 +77760,8 @@ index b56a03e0139cbee591a3d8556be9a7b926123ac9..ac5d90dbc846eb89d6c31d7599020d24
 +)
 +
  from vllm_ascend.utils import vllm_version_is
-
-
+ 
+ 
 @@ -154,6 +160,8 @@ def group_and_unify_kv_cache_specs(
      Group the KV cache specs and unify each group into one UniformTypeKVCacheSpecs.
      Currently, this is only used for DeepseekV4.
@@ -77770,7 +77770,7 @@ index b56a03e0139cbee591a3d8556be9a7b926123ac9..ac5d90dbc846eb89d6c31d7599020d24
 +        return groups
      if not any(isinstance(spec, SlidingWindowMLASpec) for spec in kv_cache_spec.values()):
          return None
-
+ 
 @@ -187,6 +195,8 @@ def _get_kv_cache_groups_uniform_groups(
      """
      Generate the KV cache groups from the grouped specs.
@@ -77791,7 +77791,7 @@ index b56a03e0139cbee591a3d8556be9a7b926123ac9..ac5d90dbc846eb89d6c31d7599020d24
      page_sizes = sorted(full_mla_spec.get_page_sizes())
 @@ -357,3 +369,17 @@ else:
  import vllm.v1.engine.core  # noqa: E402
-
+ 
  vllm.v1.engine.core.resolve_kv_cache_block_sizes = _ascend_resolve_kv_cache_block_sizes
 +
 +
@@ -77959,12 +77959,12 @@ index 70ef1d79a8d52d79b9d808f16257d39951a3d48b..45541e3b640de9bd56602f15f8984d1b
 --- a/vllm_ascend/worker/model_runner_v1.py
 +++ b/vllm_ascend/worker/model_runner_v1.py
 @@ -195,6 +195,7 @@ else:
-
+ 
  from vllm.model_executor.layers.attention import Attention, MLAAttention
-
+ 
 +from vllm_ascend.core.deepseek_v41 import is_v41_spec, plan_cache_slots, reshape_cache
  from vllm_ascend.core.kv_cache_interface import AscendMLAAttentionSpec, AscendSlidingWindowMLASpec
-
+ 
  # if true, allow tensor initialization and casting with internal format (e.g., NZ)
 @@ -2851,6 +2852,9 @@ class NPUModelRunner(GPUModelRunner):
              "inputs_embeds": inputs_embeds,
@@ -77974,12 +77974,12 @@ index 70ef1d79a8d52d79b9d808f16257d39951a3d48b..45541e3b640de9bd56602f15f8984d1b
 +        if prepare_engram is not None:
 +            model_inputs.update(prepare_engram(input_ids, positions, num_tokens_padded))
          run_model = partial(self.model, **model_inputs)
-
+ 
          if self.enable_enpu:
 @@ -3194,6 +3198,9 @@ class NPUModelRunner(GPUModelRunner):
              cm_base.num_logits_indices = logits_indices.size(0)
              cm_base.logits_indices_padded = self._prepare_kv_sharing_fast_prefill(logits_indices)
-
+ 
 +        common_v41_metadata = {}
 +        common_v41_batch_metadata = {}
 +
@@ -77989,7 +77989,7 @@ index 70ef1d79a8d52d79b9d808f16257d39951a3d48b..45541e3b640de9bd56602f15f8984d1b
 @@ -3209,7 +3216,14 @@ class NPUModelRunner(GPUModelRunner):
                  cascade_attn_prefix_lens[kv_cache_gid][attn_gid] if cascade_attn_prefix_lens else 0
              )
-
+ 
 +            from vllm_ascend.attention.dsa_v41 import DeepseekV41MetadataBuilder
              extra_attn_metadata_args = {}
 +            if isinstance(builder, DeepseekV41MetadataBuilder):
@@ -78039,7 +78039,7 @@ index 70ef1d79a8d52d79b9d808f16257d39951a3d48b..45541e3b640de9bd56602f15f8984d1b
              current_kv_cache_spec = group.kv_cache_spec
 @@ -4374,6 +4410,13 @@ class NPUModelRunner(GPUModelRunner):
                      continue
-
+ 
                  current_kv_cache_spec = layer_kv_cache_spec[layer_name]
 +                if is_v41_spec(current_kv_cache_spec):
 +                    offset, block_stride = layer_placements[layer_name]
@@ -78048,6 +78048,6 @@ index 70ef1d79a8d52d79b9d808f16257d39951a3d48b..45541e3b640de9bd56602f15f8984d1b
 +                        num_blocks=kv_cache_config.num_blocks, offset=offset, block_stride=block_stride,
 +                    )
 +                    continue
-
+ 
                  # TODO: remove this after the OOM issue is located and fixed, otherwise, some model may
                  # encounter OOM issue

@@ -33,10 +33,10 @@ def main():
     for name, key in [("vllm", "vllm"), ("vllm-ascend", "vllm_ascend")]:
         if info[name] != expected_rollout[key]["commit"]:
             raise SystemExit(f"Image {name} commit differs from the recipe")
-    expected_megatron = json.loads((root / "docker/v41/sources/framework-sources.json").read_text())
+    expected_megatron = json.loads((root / "dependencies/framework-sources.json").read_text())
     if info["megatron"] != expected_megatron["sources"]["Megatron-LM"]:
         raise SystemExit("Image Megatron source/patch receipt differs from the recipe")
-    expected_sources = json.loads((root / "docker/v41/sources/framework-sources.json").read_text())
+    expected_sources = json.loads((root / "dependencies/framework-sources.json").read_text())
     if info.get("sources") != expected_sources:
         raise SystemExit("Image framework sources/patches differ; rebuild the shared image")
     for name, version in {

@@ -75,7 +75,7 @@
       },
       "external_runtime_required": false,
       "recipe_runtime": "workspace/rollout/dsv41/runtime",
-      "source_manifest": "docker/v41/sources/framework-sources.json"
+      "source_manifest": "dependencies/framework-sources.json"
     },
     "v4": {
       "vllm": {
@@ -86,7 +86,7 @@
         "repository": "https://github.com/vllm-project/vllm-ascend",
         "commit": "23e286f9f4a7de13aa192c43ba894cf4e2ceabdb"
       },
-      "source_manifest": "docker/v41/sources/framework-sources.json"
+      "source_manifest": "dependencies/framework-sources.json"
     },
     "k26": {
       "status": "pending_version_pin"

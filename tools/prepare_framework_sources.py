@@ -4,8 +4,8 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 
 def verify(root, source):
@@ -78,6 +78,11 @@ def prepare(root, manifest_path):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=Path(__file__).resolve().parents[1] / "dependencies/framework-sources.json",
+        help="Source manifest (defaults to the repository framework manifest)",
+    )
     args = parser.parse_args()
     prepare(args.root, args.manifest)

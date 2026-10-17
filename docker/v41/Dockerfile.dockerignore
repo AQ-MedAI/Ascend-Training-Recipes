@@ -2,6 +2,13 @@
 **
 !dependencies/
 !dependencies/registry.json
+!dependencies/framework-sources.json
+!patches/
+!patches/**
+patches/**/legacy/
+patches/**/legacy/**
+!tools/
+!tools/prepare_framework_sources.py
 !docker/
 !docker/v41/
 !docker/v41/Dockerfile
@@ -12,10 +19,6 @@
 !docker/v41/hardware-constraints.txt
 !docker/v41/download_dependencies.py
 !docker/v41/native-dependencies.json
-!docker/v41/prepare_framework_sources.py
-!docker/v41/sources/
-!docker/v41/sources/**
-!docker/v41/megatron-source.json
 !docker/v41/Megatron-LM-LICENSE
 !docker/v41/locks/
 !docker/v41/locks/**

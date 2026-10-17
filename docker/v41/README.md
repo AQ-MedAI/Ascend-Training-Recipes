@@ -10,11 +10,11 @@
 
 基础标签来自 [verl 上游 Dockerfile](https://github.com/verl-project/verl/blob/main/docker/ascend/Dockerfile.ascend_9.1.0_a3_v0.9.1)：`swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12`。正式发布仍需固定目标架构 digest。CANN/ATB、编译器及驱动配套须验收。当前构建目标沿用 `ascend910_9382`，与上游示例的 `9392` 不同，需按实际芯片确认。
 
-镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。三个框架统一从 `sources/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
+镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。三个框架统一从 `dependencies/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
 
 ## 固定框架
 
-- Megatron-LM：0.12.1，上游 `a845aa7e12b3a117e24c2352b9e3e60bad2e3a17` + [补丁](sources/megatron-lm-local.patch)，来源与逐文件校验值见 [登记](sources/framework-sources.json)，许可证见 [许可证](Megatron-LM-LICENSE)。已验证基线加补丁重建参考源码；不是 NPU 验收。
+- Megatron-LM：0.12.1，上游 `a845aa7e12b3a117e24c2352b9e3e60bad2e3a17` + [补丁](../../patches/megatron-lm/megatron-lm-local.patch)，来源与逐文件校验值见 [登记](../../dependencies/framework-sources.json)，许可证见 [许可证](Megatron-LM-LICENSE)。已验证基线加补丁重建参考源码；不是 NPU 验收。
 - vLLM：`0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665`。
 - vLLM-Ascend：`23e286f9f4a7de13aa192c43ba894cf4e2ceabdb`。
 - Transformers：训练和 rollout 统一为 5.14.1，使用同一 Python 环境；训练兼容性尚需 NPU 验收。
@@ -126,9 +126,9 @@ For an older image, set `V41_IMAGE_METADATA=/opt/v41-image` when running environ
 
 ## Shared framework source reconstruction
 
-All three frameworks are siblings under `/opt/ascend-training`: `Megatron-LM`, `vllm`, and `vllm-ascend`. The build fetches fixed public commits and applies the patches in [sources](sources/framework-sources.json), checking every source file before installation. It does not require a local dependency checkout in the Docker context. The vLLM baseline is v0.23.0; vLLM-Ascend uses a pinned commit from releases/v0.23.0. These are fixed reconstruction bases, not floating latest branches.
+All three frameworks are siblings under `/opt/ascend-training`: `Megatron-LM`, `vllm`, and `vllm-ascend`. The build fetches fixed public commits and applies the patches in [sources](../../dependencies/framework-sources.json), checking every source file before installation. It does not require a local dependency checkout in the Docker context. The vLLM baseline is v0.23.0; vLLM-Ascend uses a pinned commit from releases/v0.23.0. These are fixed reconstruction bases, not floating latest branches.
 
-`COMPILE_CUSTOM_KERNELS=1` explicitly compiles vLLM-Ascend. Use `docker build --progress=plain ...` for live compiler output; successful images retain `/opt/ascend-training/manifest/build-logs/vllm-ascend.log`. A failed RUN does not produce an image containing that log, so capture the host build output with `tee` when diagnosing failures. The build checks the native extension and vendor directory, and keeps source patches and receipts under `manifest/sources/`.
+`COMPILE_CUSTOM_KERNELS=1` explicitly compiles vLLM-Ascend. Use `docker build --progress=plain ...` for live compiler output; successful images retain `/opt/ascend-training/manifest/build-logs/vllm-ascend.log`. A failed RUN does not produce an image containing that log, so capture the host build output with `tee` when diagnosing failures. The build checks the native extension and vendor directory, and keeps source patches and receipts under `manifest/dependencies/`, `manifest/patches/`, and `manifest/tools/`.
 
 V4.1 is backported onto the retained V4 baseline using separate `*-v41-backport.patch` files. Reconstruction verifies the V4 snapshot first, applies the backport, and then verifies the complete final inventory. Megatron-LM retains its existing baseline and patch. Transformers is pinned to `5.14.1` in the runtime overrides.
 

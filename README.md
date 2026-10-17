@@ -37,7 +37,7 @@ Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --r
 
 镜像中完成源码初始化后，执行 `bash tools/setup_environment.sh v41` 和 `source tools/activate.sh v41`。V4 可以选择 `setup_sources.sh v4`，其完整镜像组合仍待验证。
 
-公开镜像候选构建文件与待补齐材料见 [V4.1 镜像说明](docker/v41/README.md)。当前尚未完成镜像构建和 NPU 验收。
+公开镜像候选构建文件与待补齐材料见 [V4.1 镜像说明](docker/v41/README.md)。当前尚未完成镜像构建和 NPU 验收。框架源码也可以使用公共工具在本地准备，见[补丁与源码准备说明](patches/README.md)。
 
 ## 使用前准备
 
@@ -49,7 +49,8 @@ Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --r
 
 ```text
 recipes/       # 模型配置、启动与诊断脚本
-dependencies/  # registry.json：各模型的依赖版本登记
+dependencies/  # recipe 依赖登记、框架基线与补丁校验清单
+patches/       # 按框架组织的源码适配补丁
 third_party/   # 四个 fork 的 Git 子模块（默认 V4.1 基线）
 docs/          # 依赖、验证与来源说明
 tools/         # 源码/环境初始化、CPU 与启动参数检查

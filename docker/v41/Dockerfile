@@ -51,10 +51,12 @@ ENV DEPENDENCY_ROOT=/opt/ascend-training \
     MEGATRON_ROOT=/opt/ascend-training/Megatron-LM \
     SOC_VERSION=${SOC_VERSION}
 # Reconstruct all three sibling source trees from public commits and checked patches.
-COPY docker/v41/sources/ /tmp/ascend-image-build/sources/
-COPY docker/v41/prepare_framework_sources.py docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
-RUN python3 /tmp/ascend-image-build/prepare_framework_sources.py \
-    --root /opt/ascend-training --manifest /tmp/ascend-image-build/sources/framework-sources.json
+COPY dependencies/framework-sources.json /tmp/ascend-image-build/dependencies/framework-sources.json
+COPY patches/ /tmp/ascend-image-build/patches/
+COPY tools/prepare_framework_sources.py /tmp/ascend-image-build/tools/prepare_framework_sources.py
+COPY docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
+RUN python3 /tmp/ascend-image-build/tools/prepare_framework_sources.py \
+    --root /opt/ascend-training --manifest /tmp/ascend-image-build/dependencies/framework-sources.json
 
 # Only image-owned sources are built here; recipe forks/runtime are installed after cloning.
 COPY dependencies/registry.json /tmp/ascend-image-build/registry.json

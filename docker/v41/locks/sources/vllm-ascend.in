@@ -1,4 +1,4 @@
-# Dependency declarations from patched sources; see ../../sources/framework-sources.json
+# Dependency declarations from patched sources; see ../../../../dependencies/framework-sources.json
 # Should be mirrored in pyproject.toml
 cmake>=3.26
 decorator

@@ -2,7 +2,7 @@
   "repository": "https://github.com/NVIDIA/Megatron-LM",
   "base_commit": "a845aa7e12b3a117e24c2352b9e3e60bad2e3a17",
   "package_version": "0.12.1",
-  "patch": "megatron-v41.patch",
+  "patch": "../../patches/megatron-lm/legacy/megatron-v41.patch",
   "patch_sha256": "5a0249f13a55966e83fee2c03b9c37c7c2b00118c4a0550b717594152e02016c",
   "patched_files": {
     "megatron/core/dist_checkpointing/strategies/filesystem_async.py": "5df5eae15e6c4f4a42082f389fd0d112be95ff92d16456e3953a0789f2b935fe",

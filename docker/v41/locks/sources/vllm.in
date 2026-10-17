@@ -1,4 +1,4 @@
-# Dependency declarations from patched sources; see ../../sources/framework-sources.json
+# Dependency declarations from patched sources; see ../../../../dependencies/framework-sources.json
 regex # Replace re for higher-performance regex matching
 cachetools
 psutil

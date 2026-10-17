@@ -1,6 +1,6 @@
 # This configuration applies only to this repository.
 minimum_pre_commit_version: '2.9.2'
-exclude: ^(licenses/|third_party/|docker/v41/(megatron-v41\.patch|Megatron-LM-LICENSE)$)
+exclude: ^(licenses/|third_party/|patches/|docker/v41/Megatron-LM-LICENSE$)
 
 repos:
   - repo: https://github.com/PyCQA/isort

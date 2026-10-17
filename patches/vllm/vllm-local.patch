@@ -41,8 +41,8 @@ index e09bdc078bf5e1ec33bc9268c499730ebde20f3d..c95afbdcf7c0f87d61bebf872ab74e57
 --- a/requirements/build/rocm.txt
 +++ b/requirements/build/rocm.txt
 @@ -3,9 +3,6 @@
-
-
+ 
+ 
  --extra-index-url https://download.pytorch.org/whl/rocm7.1
 -torch==2.11.0
 -torchvision==0.26.0
@@ -66,11 +66,11 @@ index 5ec338af7362e093b8b029eacc83bae7ee4a1ebb..841404e27a2e64dd9fbf0893da2c35c1
 +++ b/requirements/cpu.txt
 @@ -7,8 +7,6 @@ setuptools==77.0.3 # this version can reuse CMake build dir
  numba == 0.65.0; platform_machine != "s390x" # Required for N-gram speculative decoding
-
+ 
  # Dependencies for CPUs
 -torch==2.11.0+cpu; platform_machine == "x86_64" or platform_machine == "s390x" or platform_machine == "aarch64"
 -torch==2.11.0; platform_system == "Darwin" or platform_machine == "ppc64le" or platform_machine == "riscv64"
-
+ 
  # required for the image processor of minicpm-o-2_6, this must be updated alongside torch
  torchaudio; platform_machine != "s390x" and platform_machine != "riscv64"
 diff --git a/requirements/cuda.txt b/requirements/cuda.txt
@@ -79,7 +79,7 @@ index 89be67be8f58052727a51cf08ec01fb217487329..73b7b0049daa394980689027e194b2f3
 +++ b/requirements/cuda.txt
 @@ -4,10 +4,7 @@
  numba == 0.65.0 # Required for N-gram speculative decoding
-
+ 
  # Dependencies for NVIDIA GPUs
 -torch==2.11.0
 -torchaudio==2.11.0
@@ -159,7 +159,7 @@ index e2a7adb200d451ca9f6ddc63875e55c79de76382..816a977d1e75a211409e1a502c4488ed
 -torch==2.11.0
  torchaudio
  torchvision
-
+ 
 diff --git a/vllm/distributed/device_communicators/shm_broadcast.py b/vllm/distributed/device_communicators/shm_broadcast.py
 index 9482568461c460f2b5c879084679ca030c7bd357..07fa85303de8d5d12c9ccc89e17808499e0dfdab 100644
 --- a/vllm/distributed/device_communicators/shm_broadcast.py
@@ -174,7 +174,7 @@ index 9482568461c460f2b5c879084679ca030c7bd357..07fa85303de8d5d12c9ccc89e1780849
      is_valid_ipv6_address,
 +    split_zmq_path,
  )
-
+ 
  logger = init_logger(__name__)
 @@ -425,13 +425,14 @@ class MessageQueue:
                  connect_ip = get_ip()
