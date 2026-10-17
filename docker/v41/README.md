@@ -5,18 +5,18 @@
 | 层 | 内容 | 使用范围 |
 | --- | --- | --- |
 | `common` | CANN 9.1.0 A3、Ubuntu 22.04、Python 3.12、torch 2.10.0、torch-npu 2.10.0.post4、Triton Ascend 3.2.2、Triton 3.5.0 | V4/V4.1 的公共构建基础，不是完整训练环境 |
-| `v41` | Megatron-LM 基线加补丁、固定 vLLM/vLLM-Ascend、原生算子、训练与 rollout 共用的 Python 依赖 | V4.1；不宣称兼容 V4 |
+| `v41` | Megatron-LM 基线加补丁、固定 vLLM/vLLM-Ascend、原生算子、训练与 rollout 共用的 Python 依赖 | V4/V4.1 共用源码；两个 profile 均需镜像/NPU 验收 |
 | recipe | 四个 fork、`workspace/rollout/dsv41/runtime`、启动与初始化脚本 | 运行时克隆，在全部 Ray 节点安装/激活 |
 
 基础标签来自 [verl 上游 Dockerfile](https://github.com/verl-project/verl/blob/main/docker/ascend/Dockerfile.ascend_9.1.0_a3_v0.9.1)：`swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12`。正式发布仍需固定目标架构 digest。CANN/ATB、编译器及驱动配套须验收。当前构建目标沿用 `ascend910_9382`，与上游示例的 `9392` 不同，需按实际芯片确认。
 
-镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。它只从 registry 读取 vLLM/vLLM-Ascend 的固定提交。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
+镜像构建不会克隆、安装四个 AQ-MedAI fork，也不复制 recipe runtime。三个框架统一从 `sources/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
 
 ## 固定框架
 
-- Megatron-LM：0.12.1，上游 `a845aa7e12b3a117e24c2352b9e3e60bad2e3a17` + [补丁](megatron-v41.patch)，来源与八个修改文件的校验值见 [登记](megatron-source.json)，许可证见 [许可证](Megatron-LM-LICENSE)。已验证基线加补丁重建参考源码；不是 NPU 验收。
-- vLLM：`a97dacb7106ee49f39f3d1fc6ae1800ff724e01d`。
-- vLLM-Ascend：`e67ab649500fcb21fd2139da17d0e566f7364301`。
+- Megatron-LM：0.12.1，上游 `a845aa7e12b3a117e24c2352b9e3e60bad2e3a17` + [补丁](sources/megatron-lm-local.patch)，来源与逐文件校验值见 [登记](sources/framework-sources.json)，许可证见 [许可证](Megatron-LM-LICENSE)。已验证基线加补丁重建参考源码；不是 NPU 验收。
+- vLLM：`0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665`。
+- vLLM-Ascend：`23e286f9f4a7de13aa192c43ba894cf4e2ceabdb`。
 - Transformers：训练和 rollout 统一为 5.14.1，使用同一 Python 环境；训练兼容性尚需 NPU 验收。
 
 ## 构建与使用
@@ -30,7 +30,7 @@ docker build --platform linux/arm64 --target common \
   -f docker/v41/Dockerfile -t ascend-training-common:dev .
 ```
 
-可以直接尝试构建 V4.1 开发镜像；没有完整 runtime.lock 时，按 [固定版本与安装说明](locks/README.md) 安装：
+可以直接尝试构建 V4/V4.1 共用开发镜像（保留 `v41` target 和目录名以兼容原构建命令）；没有完整 runtime.lock 时，按 [固定版本与安装说明](locks/README.md) 安装：
 
 ```bash
 docker build --platform linux/arm64 --target v41 \
@@ -49,7 +49,7 @@ source tools/activate.sh v41
 
 初始化先核对四个 fork 的 commit、镜像框架版本和 Engram 校验值，再执行 `pip install -e --no-deps --no-build-isolation`，最后报告依赖检查结果（声明冲突不阻断初始化）。不自动升级依赖或现场重建镜像算子。所有 Ray 节点需使用一致镜像、recipe 和路径，再按模型 README 启动训练。设备/驱动、共享内存和网络挂载需按机器配置。
 
-V4 可用 `bash tools/setup_sources.sh v4` 选择登记的源码版本，但当前 `setup_environment.sh v4` 会明确停止：V4 的镜像版本组合尚未完整锁定，不能默认复用 V4.1 框架层。切换 profile 后子模块工作区可能显示与默认 V4.1 引用不同，不要把临时选择误提交为默认引用。
+V4 使用同一镜像，运行 `bash tools/setup_sources.sh v4`、`bash tools/setup_environment.sh v4` 和 `source tools/activate.sh v4`。源码和补丁已统一，仍须分别执行 V4/V4.1 冒烟测试；源码校验不代表算子或模型兼容性验收。
 
 ## 仍待补齐
 
@@ -123,3 +123,26 @@ Editable framework sources and MHC runtime libraries/environment files remain in
 This cleans the final filesystem; files copied in earlier Docker layers can still occupy
 space in those layers. It does not claim to minimize the image's layered storage size.
 For an older image, set `V41_IMAGE_METADATA=/opt/v41-image` when running environment checks.
+
+## Shared framework source reconstruction
+
+All three frameworks are siblings under `/opt/ascend-training`: `Megatron-LM`, `vllm`, and `vllm-ascend`. The build fetches fixed public commits and applies the patches in [sources](sources/framework-sources.json), checking every source file before installation. It does not require a local dependency checkout in the Docker context. The vLLM baseline is v0.23.0; vLLM-Ascend uses a pinned commit from releases/v0.23.0. These are fixed reconstruction bases, not floating latest branches.
+
+`COMPILE_CUSTOM_KERNELS=1` explicitly compiles vLLM-Ascend. Use `docker build --progress=plain ...` for live compiler output; successful images retain `/opt/ascend-training/manifest/build-logs/vllm-ascend.log`. A failed RUN does not produce an image containing that log, so capture the host build output with `tee` when diagnosing failures. The build checks the native extension and vendor directory, and keeps source patches and receipts under `manifest/sources/`.
+
+V4.1 is backported onto the retained V4 baseline using separate `*-v41-backport.patch` files. Reconstruction verifies the V4 snapshot first, applies the backport, and then verifies the complete final inventory. Megatron-LM retains its existing baseline and patch. Transformers is pinned to `5.14.1` in the runtime overrides.
+
+The backport adds V4.1 configuration, model/Engram loading, tokenizer and chat encoding, hybrid cache allocation, and native QLI/mHC/sparse-attention bindings. V4 retains its original model registration and default implementation. V4.1's `HcPreV41` and `SparseFlashMlaV41` native operator names are separate from V4's operators to avoid replacing their CANN ABIs.
+
+The initial V4.1 scope is eager text RL rollout on A3: disable prefix caching and speculative decoding, and use PP=DCP=PCP=1. Tensor parallelism remains available; MoE uses the retained v0.23 sequence-parallel handling. Multimodal inputs are rejected until vision hash routing is ported. The current cache planner requires the released 40-layer topology; arbitrary layer pruning, full graph mode, and speculative decoding are not covered. Unsupported settings fail explicitly during initialization.
+
+Source reconstruction and CPU configuration/encoding/cache checks do not validate NPU compilation or numerical correctness. Before release, build the image and run both V4 and V4.1 rollout plus training smoke tests on A3, checking output/log-probability behavior and synchronization with the actor.
+
+CPU cache regression checks can run in a separate process with Torch, Transformers 5.14.1 and pytest installed:
+
+```bash
+python docker/v41/tests/check_v41_cache_cpu.py --framework-root /opt/ascend-training
+python docker/v41/tests/check_v41_frontend_cpu.py --framework-root /opt/ascend-training
+```
+
+This check loads the real source cache classes with device-facing imports stubbed. It does not load or test the native kernels.

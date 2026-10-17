@@ -39,33 +39,19 @@ fi
 rollout="$ROOT/workspace/rollout/dsv41"
 mkdir -p "$rollout/build-src"
 export VLLM_ROOT="$ROOT/vllm" VLLM_ASCEND_ROOT="$ROOT/vllm-ascend"
-"$PYTHON_BIN" - <<'PY'
-import json
-import subprocess
-from pathlib import Path
-registry = json.loads(Path('/tmp/ascend-image-build/registry.json').read_text())['rollout']['v41']
-root = Path('/opt/ascend-training')
-for name, key in [('vllm', 'vllm'), ('vllm-ascend', 'vllm_ascend')]:
-    source = registry[key]
-    path = root / name
-    subprocess.run(['git', 'init', str(path)], check=True)
-    subprocess.run(['git', '-C', str(path), 'remote', 'add', 'origin', source['repository'] + '.git'], check=True)
-    subprocess.run(['git', '-C', str(path), 'fetch', '--depth=1', 'origin', source['commit']], check=True)
-    subprocess.run(['git', '-C', str(path), 'checkout', '--detach', 'FETCH_HEAD'], check=True)
-    assert subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'], text=True).strip() == source['commit']
-PY
 download_args=()
 [[ "${DEPENDENCY_OFFLINE:-0}" != 1 ]] || download_args+=(--offline)
 "$PYTHON_BIN" /tmp/ascend-image-build/download_dependencies.py --workspace "$ROOT/workspace" "${download_args[@]}"
 "$PYTHON_BIN" "$rollout/prepare_native_deps.py"
 build_root="$rollout/build-src"
-VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE=0.1.dev1+ga97dacb7106ee.empty \
+mkdir -p "$ROOT/manifest/build-logs"
+VLLM_TARGET_DEVICE=empty VLLM_VERSION_OVERRIDE=0.23.0 \
     VLLM_REQUIRE_RUST_FRONTEND=0 "$PYTHON_BIN" -m pip install \
     --no-deps --no-build-isolation -e "$VLLM_ROOT"
 export PYTHONPATH="$VLLM_ROOT:$VLLM_ASCEND_ROOT"
-SETUPTOOLS_SCM_PRETEND_VERSION=0.1.dev1+ge67ab649500f COMPILE_CUSTOM_KERNELS=1 \
-    "$PYTHON_BIN" -m pip install \
-    --no-deps --no-build-isolation -e "$VLLM_ASCEND_ROOT"
+SETUPTOOLS_SCM_PRETEND_VERSION=0.23.0 COMPILE_CUSTOM_KERNELS=1 \
+    "$PYTHON_BIN" -m pip install -v \
+    --no-deps --no-build-isolation -e "$VLLM_ASCEND_ROOT" 2>&1 | tee "$ROOT/manifest/build-logs/vllm-ascend.log"
 unset PYTHONPATH
 export V41_MHC_SOC=ascend910_93 V41_MHC_BUILD_JOBS="${MAX_JOBS:-4}"
 bash workspace/tests/dsv41/build_mhc_premix.sh
@@ -96,8 +82,9 @@ expected.update({'numpy': '1.26.4', 'transformers': '5.14.1', 'fastapi': '0.123.
                  'model-hosting-container-standards': '0.1.16'})
 assert all(packages.get(k) == v for k,v in expected.items()), packages
 registry = json.loads((root/'registry.json').read_text())['rollout']['v41']
-receipt = {'profile':'v41', 'python_environment':'single', 'vllm':registry['vllm']['commit'], 'vllm-ascend':registry['vllm_ascend']['commit'],
-           'megatron':json.loads((root/'megatron-source.json').read_text())}
+receipt = {'profile':'v4-v41', 'python_environment':'single', 'vllm':registry['vllm']['commit'], 'vllm-ascend':registry['vllm_ascend']['commit'],
+           'megatron':json.loads((root/'sources/framework-sources.json').read_text())['sources']['Megatron-LM']}
+receipt['sources'] = json.loads((root/'sources/framework-sources.json').read_text())
 (manifest/'frameworks.json').write_text(json.dumps(receipt, indent=2)+'\n')
 PY
 
@@ -108,8 +95,9 @@ import shutil
 from pathlib import Path
 build = Path('/tmp/ascend-image-build')
 root = Path('/opt/ascend-training')
-for name in ('registry.json', 'megatron-source.json', 'native-dependencies.json', 'Megatron-LM-LICENSE'):
+for name in ('registry.json', 'native-dependencies.json', 'Megatron-LM-LICENSE'):
     shutil.copy2(build / name, root / 'manifest' / name)
+shutil.copytree(build / 'sources', root / 'manifest/sources', dirs_exist_ok=True)
 workspace = root / 'workspace'
 mhc = workspace / 'rollout/dsv41/build-src/mhc-premix'
 # Preserve installed operators and Python wrappers; remove only build inputs.

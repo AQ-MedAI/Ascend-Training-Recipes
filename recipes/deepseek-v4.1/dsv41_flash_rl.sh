@@ -362,6 +362,7 @@ ROLLOUT_CONFIG=(
     actor_rollout_ref.rollout.expert_parallel_size="${ROLLOUT_EP}"
     actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes="${WEIGHT_BUCKET_MB:-3072}"
     actor_rollout_ref.rollout.enforce_eager=True
+    actor_rollout_ref.rollout.enable_prefix_caching=False
     actor_rollout_ref.rollout.free_cache_engine=True
     ++actor_rollout_ref.rollout.engine_kwargs.vllm.safetensors_load_strategy=lazy
     ++actor_rollout_ref.rollout.engine_kwargs.vllm.additional_config.enable_engram=False

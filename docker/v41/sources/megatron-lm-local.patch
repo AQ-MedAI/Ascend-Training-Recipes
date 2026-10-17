@@ -1,0 +1,637 @@
+diff --git a/megatron/core/dist_checkpointing/strategies/filesystem_async.py b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
+index 2af90a65b8c4bb9ed33b117a95c30286a479670c..7bae5381fe43cc8522f6266e199b64cd13d096dc 100644
+--- a/megatron/core/dist_checkpointing/strategies/filesystem_async.py
++++ b/megatron/core/dist_checkpointing/strategies/filesystem_async.py
+@@ -2,9 +2,12 @@
+
+ """ Storage writer for PyT Distributed format allowing asynchronous save. """
+ import dataclasses
++import inspect
+ import logging
+ import os
+ import queue
++import shutil
++import traceback
+ from functools import partial
+ from heapq import heappop, heappush
+ from itertools import chain
+@@ -34,7 +37,7 @@ _results_queue = None
+ def _get_write_results_queue():
+     global _results_queue
+     if _results_queue is None:
+-        ctx = mp.get_context('fork')
++        ctx = mp.get_context('spawn')
+         with _disable_gc():
+             _results_queue = ctx.Manager().Queue()
+     return _results_queue
+@@ -172,9 +175,19 @@ class FileSystemWriterAsync(FileSystemWriter):
+         if not self.write_buckets:
+             return None, None, ()
+         transform_list = [self.transforms] if hasattr(self, 'transforms') else []
++
++        # ``preload_tensors`` is a static API. MindSpeed replaces it through
++        # its patch manager, and some patch orders assign the replacement as a
++        # plain class function. Accessing it through ``self`` would then bind
++        # the writer implicitly and pass three positional arguments to the
++        # two-argument API. Fetch the raw descriptor so the call is independent
++        # of how the replacement was attached to the class.
++        preload_tensors = inspect.getattr_static(type(self), 'preload_tensors')
++        if isinstance(preload_tensors, staticmethod):
++            preload_tensors = preload_tensors.__func__
+         return (
+             partial(self.write_preloaded_data_multiproc, transform_list),
+-            partial(self.preload_tensors, self.write_buckets, True),
++            partial(preload_tensors, self.write_buckets, True),
+             [torch.distributed.get_rank(), self.write_buckets, self.results_queue],
+         )
+
+@@ -314,24 +327,68 @@ class FileSystemWriterAsync(FileSystemWriter):
+         local_results = []
+         try:
+             file_name, storage_key, (bytes_data, tensor_data) = write_bucket
++            write_item_kwargs = {}
++            if 'serialization_format' in inspect.signature(_write_item).parameters:
++                from torch.distributed.checkpoint.filesystem import SerializationFormat
++
++                write_item_kwargs['serialization_format'] = SerializationFormat.TORCH_SAVE
+             with open(file_name, "wb") as stream:
+                 for write_item, data in bytes_data:
+                     local_results.append(
+-                        _write_item(*transform_list, stream, data, write_item, storage_key)
++                        _write_item(
++                            *transform_list,
++                            stream,
++                            data,
++                            write_item,
++                            storage_key,
++                            **write_item_kwargs,
++                        )
+                     )
+
+                 for write_item, tensor in tensor_data:
+                     assert tensor.is_cpu
+                     local_results.append(
+-                        _write_item(*transform_list, stream, tensor, write_item, storage_key)
++                        _write_item(
++                            *transform_list,
++                            stream,
++                            tensor,
++                            write_item,
++                            storage_key,
++                            **write_item_kwargs,
++                        )
+                     )
+
+                 if use_fsync:
+                     os.fsync(stream.fileno())
+             local_output = (local_proc_idx, local_results)
+-        except Exception as e:
++        except Exception:
+             logger.debug(f'{local_proc_idx} failed')
+-            local_output = (local_proc_idx, e)
++            # Exceptions raised while ``torch.save`` unwinds can hide the
++            # original filesystem error behind an ``unexpected pos`` error.
++            # Exception chaining is also lost when the exception object is
++            # sent through the multiprocessing queue.  Preserve the complete
++            # traceback and basic destination diagnostics in the parent
++            # process without changing the checkpoint format or write path.
++            try:
++                file_offset = stream.tell()
++            except Exception:
++                file_offset = 'unavailable'
++            try:
++                disk_usage = shutil.disk_usage(Path(file_name).parent)
++                disk_free = disk_usage.free
++                disk_total = disk_usage.total
++            except Exception:
++                disk_free = 'unavailable'
++                disk_total = 'unavailable'
++            local_output = (
++                local_proc_idx,
++                RuntimeError(
++                    'Async checkpoint writer failed: '
++                    f'file={file_name!s}, offset={file_offset}, '
++                    f'disk_free={disk_free}, disk_total={disk_total}\n'
++                    f'{traceback.format_exc()}'
++                ),
++            )
+
+         results_queue.put(local_output)
+         # Signal this process is done.
+diff --git a/megatron/core/dist_checkpointing/strategies/torch.py b/megatron/core/dist_checkpointing/strategies/torch.py
+index 06c262a8f4d5aea422b78a8521861991242c7724..501e37fb2f7988d5fd7c53e59c83d4c0e1cf67a0 100644
+--- a/megatron/core/dist_checkpointing/strategies/torch.py
++++ b/megatron/core/dist_checkpointing/strategies/torch.py
+@@ -422,6 +422,14 @@ def _restore_dict_types(x: Union[dict, list, Any], keys_template: Union[dict, li
+             _restore_dict_types(x_val, templ_val)
+
+
++@dataclass
++class MCoreMetadata(Metadata):
++    """Preserve MCore extensions when PyTorch copies metadata with dataclasses.replace."""
++
++    mcore_data: Optional[Dict[str, Dict[str, Any]]] = None
++    all_local_plans: Optional[List[SavePlan]] = None
++
++
+ @dataclass(frozen=True)
+ class MCoreSavePlan(SavePlan):
+     """SavePlan with MCore specific data."""
+@@ -494,6 +502,10 @@ class MCoreSavePlanner(DefaultSavePlanner):
+     def create_global_plan(self, all_plans: List[MCoreSavePlan]) -> Tuple[List[SavePlan], Metadata]:
+         """Merges MCore data for all plans."""
+         global_plan, metadata = super().create_global_plan(all_plans)
++        # PyTorch 2.10 FileSystemWriter.finish uses dataclasses.replace to set
++        # the checkpoint version. Dynamic attributes are discarded there;
++        # declare our extensions as fields so tensor shape metadata survives.
++        metadata = MCoreMetadata(**vars(metadata))
+         metadata.mcore_data = dict(ChainMap(*(plan.mcore_data for plan in all_plans)))
+         return global_plan, metadata
+
+@@ -812,12 +824,15 @@ def get_reformulation_metadata(
+             as stored in `mcore_data` in the checkpoint.
+     """
+     ckpt_metadata = FileSystemReader(checkpoint_dir).read_metadata()
++    # Legacy DCP Metadata may not contain MCore's extension at all. Treat it
++    # like a missing tensor entry so the existing legacy 1-D path can handle it.
++    mcore_data = getattr(ckpt_metadata, 'mcore_data', None) or {}
+     reformulation_metadata = {}
+     for sh_ten in nested_values(sharded_state_dict):
+         if not is_nd_flattened_tensor(sh_ten):
+             continue
+         try:
+-            ckpt_global_shape = ckpt_metadata.mcore_data[sh_ten.key][
++            ckpt_global_shape = mcore_data[sh_ten.key][
+                 'nd_reformulated_orig_global_shape'
+             ]
+         except KeyError as e:
+@@ -829,7 +844,7 @@ def get_reformulation_metadata(
+                 continue
+             raise CheckpointingException(
+                 f'Cannot find global shape metadata for N-D flattened tensor {sh_ten} '
+-                f'in checkpoint metadata: {ckpt_metadata.mcore_data}'
++                f'in checkpoint {checkpoint_dir}, metadata: {mcore_data}'
+             ) from e
+
+         reformulation_metadata[sh_ten.key] = TensorReformulationMetadata(
+diff --git a/megatron/core/distributed/distributed_data_parallel.py b/megatron/core/distributed/distributed_data_parallel.py
+index 63ae456146996ad9a41497841b4dd901d9bcd181..51707b9e0aece75705eabff0cd0de7fbeb76d54b 100644
+--- a/megatron/core/distributed/distributed_data_parallel.py
++++ b/megatron/core/distributed/distributed_data_parallel.py
+@@ -83,6 +83,7 @@ class DistributedDataParallel(_BaseDataParallel):
+         # Group parameters by their gradient type.
+         param_to_name = {}
+         dense_params = []
++        owner_params = []
+         expert_parallel_params = []
+         self.params_with_grad = []
+         for name, param in self.module.named_parameters():
+@@ -96,7 +97,9 @@ class DistributedDataParallel(_BaseDataParallel):
+             param.grad_added_to_main_grad = False
+             param_to_name[param] = name
+
+-            if getattr(param, 'allreduce', True):
++            if getattr(param, 'engram_row_sharded', False):
++                owner_params.append(param)
++            elif getattr(param, 'allreduce', True):
+                 dense_params.append(param)
+             else:
+                 expert_parallel_params.append(param)
+@@ -293,6 +296,18 @@ class DistributedDataParallel(_BaseDataParallel):
+             )
+         )
+
++        self.owner_buffers, self.owner_bucket_groups = [], []
++        if owner_params:
++            if self.ddp_config.num_distributed_optimizer_instances != 1:
++                raise ValueError('Row-owned tables require one distributed optimizer instance')
++            group = owner_params[0].owner_data_parallel_group
++            if any(p.owner_data_parallel_group is not group for p in owner_params):
++                raise ValueError('Row-owned table groups differ')
++            factor = (1.0 if config.calculate_per_token_loss else
++                      1.0 / parallel_state.get_data_parallel_world_size(with_context_parallel=True))
++            self.owner_buffers, self.owner_bucket_groups = _allocate_buffers_for_parameters(
++                owner_params, group, gradient_scaling_factor=factor)
++
+         # Delete references to weight_tensor if they exist since we don't want two parameter copies
+         # if we re-mapped parameters (which happens when we use the distributed optimizer).
+         # This is a temporary workaround around a TE bug that is fixed with
+@@ -425,12 +440,12 @@ class DistributedDataParallel(_BaseDataParallel):
+         """
+         Context manager that turns off gradient synchronization.
+         """
+-        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups:
++        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups + self.owner_bucket_groups:
+             bucket_group.is_last_microbatch = False
+         try:
+             yield
+         finally:
+-            for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups:
++            for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups + self.owner_bucket_groups:
+                 bucket_group.is_last_microbatch = True
+
+     def start_param_sync(self, *unused, force_sync: bool = False, force_dispatch: bool = False):
+@@ -452,7 +467,7 @@ class DistributedDataParallel(_BaseDataParallel):
+             if self.overlap_param_gather_with_optimizer_step and not force_dispatch:
+                 return
+
+-        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups:
++        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups + self.owner_bucket_groups:
+             bucket_group.start_param_sync(force_sync=force_sync)
+
+     def start_grad_sync(self, *unused):
+@@ -464,7 +479,7 @@ class DistributedDataParallel(_BaseDataParallel):
+         calls. When overlap_grad_reduce is set to False, calls synchronous
+         communication ops.
+         """
+-        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups:
++        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups + self.owner_bucket_groups:
+             bucket_group.start_grad_sync()
+
+     def finish_grad_sync(self):
+@@ -476,12 +491,12 @@ class DistributedDataParallel(_BaseDataParallel):
+         calls to complete. When overlap_grad_reduce is set to False, calls synchronous
+         communication ops.
+         """
+-        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups:
++        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups + self.owner_bucket_groups:
+             bucket_group.finish_grad_sync()
+
+     def scale_gradients(self, scaling_factor: float):
+         """Scale all gradients inside the buffers by `scaling_factor`."""
+-        for buffer in self.buffers + self.expert_parallel_buffers:
++        for buffer in self.buffers + self.expert_parallel_buffers + self.owner_buffers:
+             buffer.scale_gradients(scaling_factor)
+
+     def zero_grad_buffer(self):
+@@ -495,9 +510,9 @@ class DistributedDataParallel(_BaseDataParallel):
+             # to True, and there will be a double-GA.
+             for param in self.params_with_grad:
+                 param.grad_added_to_main_grad = False
+-        for buffer in self.buffers + self.expert_parallel_buffers:
++        for buffer in self.buffers + self.expert_parallel_buffers + self.owner_buffers:
+             buffer.reset()
+-        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups:
++        for bucket_group in self.bucket_groups + self.expert_parallel_bucket_groups + self.owner_bucket_groups:
+             bucket_group.reset()
+
+     def broadcast_params(self):
+@@ -505,6 +520,8 @@ class DistributedDataParallel(_BaseDataParallel):
+         Syncs parameters across all DP ranks.
+         """
+         for param in self.module.parameters():
++            if getattr(param, 'engram_row_sharded', False):
++                continue  # Unique rows must never be broadcast as DP replicas.
+             is_expert_parallel = not getattr(param, 'allreduce', True)
+
+             if is_expert_parallel:
+diff --git a/megatron/core/optimizer/__init__.py b/megatron/core/optimizer/__init__.py
+index 2608fde8e0243725eb9b8d68759594a5cf56e1ae..029213797ec7c53edea6ef7c67869b9019c5029d 100644
+--- a/megatron/core/optimizer/__init__.py
++++ b/megatron/core/optimizer/__init__.py
+@@ -130,7 +130,8 @@ def _get_param_groups(
+             ):
+                 is_decoupled_lr = True
+
+-            key = (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr)
++            key = (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr,
++                   getattr(param, 'engram_row_sharded', False))
+             if key not in params_map:
+                 params_map[key] = []
+             if (
+@@ -142,7 +143,7 @@ def _get_param_groups(
+                 params_map[key].append(param)
+
+     param_groups = []
+-    for (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr), params in params_map.items():
++    for (wd_mult, _lr_mult, is_expert_parallel, is_decoupled_lr, is_rank_owned), params in params_map.items():
+         assert len(params) > 0
+         param_group = {
+             'params': params,
+@@ -150,6 +151,7 @@ def _get_param_groups(
+             'lr_mult': _lr_mult,
+             'is_expert_parallel': is_expert_parallel,
+             'is_decoupled_lr': is_decoupled_lr,
++            'is_rank_owned': is_rank_owned,
+         }
+         param_groups.append(param_group)
+
+@@ -427,6 +429,27 @@ def _get_megatron_optimizer_based_on_param_groups(
+     return optimizer
+
+
++def _get_rank_owned_optimizer(config, model_chunks, no_weight_decay_cond,
++                              scale_lr_cond, lr_mult, use_gloo_process_groups):
++    """Reuse the native factory with singleton ownership, not expert DP replicas."""
++    owner_param_groups, owner_buffers = _get_param_groups_and_buffers(
++        model_chunks, model_chunk_offset=0, config=config,
++        no_weight_decay_cond=no_weight_decay_cond, scale_lr_cond=scale_lr_cond,
++        lr_mult=lr_mult, filter_fn=lambda g: g.get('is_rank_owned', False), buffer_name='owner_buffers')
++    if owner_param_groups:
++        p = owner_param_groups[0]['params'][0]
++        owner_optimizer = _get_megatron_optimizer_based_on_param_groups(
++            config, model_chunks=model_chunks, param_groups=owner_param_groups,
++            per_model_buffers=owner_buffers, model_parallel_group=torch.distributed.group.WORLD,
++            data_parallel_group=p.owner_data_parallel_group,
++            data_parallel_group_gloo=p.owner_data_parallel_group_gloo if use_gloo_process_groups else None,
++            data_parallel_group_idx=torch.distributed.get_rank())
++        owner_optimizer.is_rank_owned_optimizer = True
++        return owner_optimizer
++
++    return None
++
++
+ def get_megatron_optimizer(
+     config: OptimizerConfig,
+     model_chunks: List[MegatronModule],
+@@ -525,7 +548,7 @@ def get_megatron_optimizer(
+             no_weight_decay_cond=no_weight_decay_cond,
+             scale_lr_cond=scale_lr_cond,
+             lr_mult=lr_mult,
+-            filter_fn=lambda g: not g['is_expert_parallel'],
++            filter_fn=lambda g: not g['is_expert_parallel'] and not g.get('is_rank_owned', False),
+             buffer_name='buffers',
+         )
+         for model_chunk in dense_model_chunks:
+@@ -557,6 +580,11 @@ def get_megatron_optimizer(
+         )
+         model_chunk_offset += 1
+
++    owner_optimizer = _get_rank_owned_optimizer(config, model_chunks,
++        no_weight_decay_cond, scale_lr_cond, lr_mult, use_gloo_process_groups)
++    if owner_optimizer is not None:
++        optimizers.append(owner_optimizer)
++
+     moe_param_groups, moe_buffers = _get_param_groups_and_buffers(
+         model_chunks,
+         model_chunk_offset=0,
+@@ -564,7 +592,7 @@ def get_megatron_optimizer(
+         no_weight_decay_cond=no_weight_decay_cond,
+         scale_lr_cond=scale_lr_cond,
+         lr_mult=lr_mult,
+-        filter_fn=lambda g: g['is_expert_parallel'],
++        filter_fn=lambda g: g['is_expert_parallel'] and not g.get('is_rank_owned', False),
+         buffer_name='expert_parallel_buffers',
+     )
+     if len(moe_param_groups) > 0:
+diff --git a/megatron/core/optimizer/cpu_offloading/hybrid_optimizer.py b/megatron/core/optimizer/cpu_offloading/hybrid_optimizer.py
+index 969a8f80c10376c06559dbec81a1d42543522323..b66bcdba8c6f2bdbb1610fd041d57da78349f6a8 100644
+--- a/megatron/core/optimizer/cpu_offloading/hybrid_optimizer.py
++++ b/megatron/core/optimizer/cpu_offloading/hybrid_optimizer.py
+@@ -370,61 +370,57 @@ class HybridDeviceOptimizer(torch.optim.Optimizer):
+         if not self.param_update_in_fp32:
+             return
+         for param, v in self.state.items():
+-            fp32_param = self.param_to_fp32_param[param]
+-            fp32_param.data.copy_(v["master_param"])
++            # Native FP32 params do not need a separate master parameter and are
++            # intentionally absent from param_to_fp32_param.
++            fp32_param = self.param_to_fp32_param.get(param)
++            if fp32_param is not None:
++                fp32_param.data.copy_(v["master_param"])
+
+     def _register_load_state_dict_hooks(self):
+         def pre_load_state_dict_hook(self, state_dict):
+             """
+-            Pre-load state dictionary hook to prevent loss of precision in
+-            mixed-precision training.
++            Load state using the existing sub-optimizer parameters as targets.
+
+-            When loading a state dictionary with `torch.load_state_dict`,
+-            optimizer states are reset and cast from `float32` to `bfloat16`/`float16`,
+-            potentially losing precision. This hook replaces parameters with
+-            their `float32` copies to mitigate this issue.
++            PyTorch casts state to the target parameter's dtype and device.
++            Using the inner parameters preserves FP32 precision and keeps
++            offloaded Adam state on CPU, including native FP32 parameters
++            absent from param_to_fp32_param.
+
+             Args:
+                 state_dict (dict): The state dictionary to be loaded.
+
+             Returns:
+-                dict: The modified state dictionary with `float32` parameters.
++                dict: The state dictionary to load.
+             """
+-            if not self.param_update_in_fp32:
+-                return state_dict
+-
+             new_state = {}
+             for param, v in self.state.items():
+-                param = self.param_to_fp32_param.get(param, param)
++                param = self.param_to_inner_param[param]
+                 new_state[param] = v
+             self.state = new_state
+
+             for group in self.param_groups:
+                 for i, param in enumerate(group["params"]):
+-                    group["params"][i] = self.param_to_fp32_param.get(param, param)
++                    group["params"][i] = self.param_to_inner_param[param]
+
+             return state_dict
+
+         self.register_load_state_dict_pre_hook(pre_load_state_dict_hook)
+
+         def post_load_state_dict_hook(self):
+-            # 1. Replace the temporarily replaced fp32 parameters back. Please
+-            # refer to the documentation in `pre_load_state_dict_hook`.
+-            if self.param_update_in_fp32:
+-                new_state = {}
+-                for param, v in self.state.items():
+-                    orig_param = self.fp32_param_to_orig_param.get(param, param)
+-                    new_state[orig_param] = v
+-                self.state = new_state
++            # Restore original parameter identities. PyTorch load_state_dict
++            # replaces state/group dictionaries, not the parameter objects.
++            new_state = {}
++            for param, v in self.state.items():
++                new_state[self.inner_param_to_orig_param[param]] = v
++            self.state = new_state
+
+-                for group in self.param_groups:
+-                    for i, param in enumerate(group["params"]):
+-                        group["params"][i] = self.fp32_param_to_orig_param.get(param, param)
++            for group in self.param_groups:
++                for i, param in enumerate(group["params"]):
++                    group["params"][i] = self.inner_param_to_orig_param[param]
+
+-            # 2. After loading state_dict, the parameters may change, and we need to
+-            # reinitialize the sub-optimizers to regenerate the new parameters and
+-            # cpu copy pairs.
+-            self._init_sub_optimizers()
++            # Reuse existing sub-optimizers and CPU copies. Rebuilding them
++            # while original parameters are temporarily offloaded loses the
++            # CPU-to-device mapping needed by the first resumed step.
+             self._sync_hdo_param_groups_to_sub_optimizers()
+             self._sync_hdo_state_to_sub_optimizers()
+
+diff --git a/megatron/core/optimizer/distrib_optimizer.py b/megatron/core/optimizer/distrib_optimizer.py
+index a00d1a35e88930a2ed1528341ca814d982dae649..f1de9b48ac8f8d0dde089eff27388104ffe03cf2 100644
+--- a/megatron/core/optimizer/distrib_optimizer.py
++++ b/megatron/core/optimizer/distrib_optimizer.py
+@@ -385,7 +385,7 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
+
+                 # fp32 params.
+                 elif model_param.type() == 'torch.cuda.FloatTensor':
+-                    shard_model_param = model_param.view(-1)[param_range.start : param_range.end]
++                    shard_model_param = model_param.detach().view(-1)[param_range.start : param_range.end]
+                     model_fp32_params_this_group.append(model_param)
+                     shard_fp32_params_this_group.append(shard_model_param)
+                     tensor_parallel.copy_tensor_model_parallel_attributes(
+@@ -581,6 +581,32 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
+         param_range_map = gbuf_range_map["param_map"][param]
+         return param_range_map
+
++    def _get_paired_main_param(self, model_param):
++        """Get the optimizer shard paired with a model parameter.
++
++        The paired lists are created directly from the grad-buffer ranges and
++        remain authoritative if an optimizer wrapper later rebuilds parameter
++        groups.
++        """
++        model_to_main_param = getattr(self, "_model_param_to_main_param_map", None)
++        if model_to_main_param is None:
++            model_to_main_param = {}
++            for model_group, main_group in zip(
++                self.model_float16_groups, self.shard_fp32_from_float16_groups
++            ):
++                model_to_main_param.update(
++                    {id(model): main for model, main in zip(model_group, main_group)}
++                )
++            for model_group, main_group in zip(self.model_fp32_groups, self.shard_fp32_groups):
++                model_to_main_param.update(
++                    {id(model): main for model, main in zip(model_group, main_group)}
++                )
++            self._model_param_to_main_param_map = model_to_main_param
++        try:
++            return model_to_main_param[id(model_param)]
++        except KeyError as exc:
++            raise KeyError("model parameter has no paired optimizer shard") from exc
++
+     def get_grad_stats_parallel_group(self) -> torch.distributed.ProcessGroup:
+         """
+         With the distributed optimizer, gradient statistics (num_zeros & norm) are reduced over
+@@ -733,7 +759,14 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
+
+         # Extract 'step', for non-Apex/TE support.
+         if not HAVE_APEX_OR_TE:
+-            steps = list(set([g["step"] for g in state_dict["optimizer"]["param_groups"]]))
++            steps = list(
++                set(
++                    [
++                        g["step"].item() if hasattr(g["step"], "item") else g["step"]
++                        for g in state_dict["optimizer"]["param_groups"]
++                    ]
++                )
++            )
+             assert len(steps) == 1
+             step = torch.tensor(steps[0], dtype=torch.float)
+
+@@ -744,7 +777,13 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
+             # Handle Torch AdamW special case, which, unlike FusedAdam, Torch AdamW
+             # has an extra optimizer state “step”.
+             steps = list(
+-                set([g["step"] for g in state_dict["optimizer"]["param_groups"] if "step" in g])
++                set(
++                    [
++                        g["step"].item() if hasattr(g["step"], "item") else g["step"]
++                        for g in state_dict["optimizer"]["param_groups"]
++                        if "step" in g
++                    ]
++                )
+             )
+             if len(steps) != 0:
+                 assert len(steps) == 1, f"steps: {steps}"
+@@ -825,9 +864,25 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
+                 tensors[k] = self.optimizer.get_unscaled_state(sharded_model_param, k)
+             tensors["param"] = tensors.pop("master_param")
+         else:
+-            main_param = self.optimizer.param_groups[group_index]["params"][group_order]
++            if isinstance(self.optimizer, HybridDeviceOptimizer):
++                main_param = self._get_paired_main_param(model_param)
++            else:
++                main_param = self.optimizer.param_groups[group_index]["params"][group_order]
+             optim_state = self.optimizer.state[main_param]
+             tensors = {"param": main_param, **optim_state}
++
++        if isinstance(self.optimizer, HybridDeviceOptimizer):
++            expected_numel = self._get_model_param_range_map(model_param)["param"].size
++            for state_key, state_tensor in tensors.items():
++                if state_key == "step" or not torch.is_tensor(state_tensor):
++                    continue
++                if state_tensor.numel() != expected_numel:
++                    raise RuntimeError(
++                        "HybridDeviceOptimizer checkpoint tensor size mismatch: "
++                        f"key={state_key}, expected={expected_numel}, "
++                        f"actual={state_tensor.numel()}, "
++                        f"model_shape={tuple(model_param.shape)}"
++                    )
+         return tensors
+
+     def _set_main_param_and_optimizer_states(self, model_param, tensors):
+@@ -871,10 +926,17 @@ class DistributedOptimizer(MixedPrecisionOptimizer):
+                 else:
+                     self.optimizer.set_scaled_state(sharded_model_param, k, v)
+         else:
+-            main_param = self.optimizer.param_groups[group_index]["params"][group_order]
++            if isinstance(self.optimizer, HybridDeviceOptimizer):
++                main_param = self._get_paired_main_param(model_param)
++            else:
++                main_param = self.optimizer.param_groups[group_index]["params"][group_order]
+             optim_state = self.optimizer.state[main_param]
+             dst_tensors = {"param": main_param, **optim_state}
+             for key in dst_tensors:
++                if key == "step" and key not in tensors:
++                    # Scalar step is excluded from parameter shards and is
++                    # restored from param_groups by load_state_dict above.
++                    continue
+                 dst_tensors[key].copy_(tensors[key])
+
+     def get_parameter_state_fs_bucket_space(self):
+diff --git a/megatron/core/pipeline_parallel/p2p_communication.py b/megatron/core/pipeline_parallel/p2p_communication.py
+index 26a96f457d9d0909fea376c6b417a774b75e6993..f8cbc5fd481efb52fac2da1fa39c45c23843c1d1 100644
+--- a/megatron/core/pipeline_parallel/p2p_communication.py
++++ b/megatron/core/pipeline_parallel/p2p_communication.py
+@@ -43,11 +43,11 @@ def _communicate_shapes(tensor_send_next, tensor_send_prev, recv_prev, recv_next
+     send_next_shape_tensor = None
+     if recv_prev:
+         recv_prev_shape_tensor = torch.empty(
+-            (3), device=torch.cuda.current_device(), dtype=torch.int64
++            (4), device=torch.cuda.current_device(), dtype=torch.int64
+         )
+     if recv_next:
+         recv_next_shape_tensor = torch.empty(
+-            (3), device=torch.cuda.current_device(), dtype=torch.int64
++            (4), device=torch.cuda.current_device(), dtype=torch.int64
+         )
+     if tensor_send_prev is not None:
+         send_prev_shape_tensor = torch.tensor(
+@@ -105,11 +105,11 @@ def _communicate_shapes(tensor_send_next, tensor_send_prev, recv_prev, recv_next
+         # should take this out once the bug with batch_isend_irecv is resolved.
+         torch.cuda.synchronize()
+
+-    recv_prev_shape = [0, 0, 0]
++    recv_prev_shape = [0, 0, 0, 0]
+     if recv_prev_shape_tensor is not None:
+         recv_prev_shape = recv_prev_shape_tensor.tolist()
+
+-    recv_next_shape = [0, 0, 0]
++    recv_next_shape = [0, 0, 0, 0]
+     if recv_next_shape_tensor is not None:
+         recv_next_shape = recv_next_shape_tensor.tolist()
+
+diff --git a/megatron/core/transformer/transformer_config.py b/megatron/core/transformer/transformer_config.py
+index 2b68a5a5f94f5e933a461b5ebc62621f4bb42048..e6cf2469ba09fa9e8fba529db143a666109ab056 100644
+--- a/megatron/core/transformer/transformer_config.py
++++ b/megatron/core/transformer/transformer_config.py
+@@ -568,8 +568,8 @@ class TransformerConfig(ModelParallelConfig):
+         if self.kv_channels is None:
+             self.kv_channels = self.hidden_size // self.num_attention_heads
+
+-        if self.num_query_groups is None:
+-            self.num_query_groups = self.num_attention_heads
++        #if self.num_query_groups is None:
++        self.num_query_groups = self.num_attention_heads
+
+         if self.num_query_groups % self.tensor_model_parallel_size != 0:
+             raise ValueError(

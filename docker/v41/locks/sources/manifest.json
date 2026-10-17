@@ -35,17 +35,17 @@
     "extraction": "requirements file"
   },
   "vllm.in": {
-    "repository": "https://github.com/vllm-project/vllm",
-    "commit": "a97dacb7106ee49f39f3d1fc6ae1800ff724e01d",
+    "repository": "https://github.com/vllm-project/vllm.git",
+    "commit": "0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665",
     "path": "requirements/common.txt",
-    "source_sha256": "74a932cfe0469864247509838b68484bb6e6b978cb87df7ccebf75112e289e9d",
-    "extraction": "requirements file"
+    "source_sha256": "35d459d03e4f446eac159b8308b0a5a95ff9ba4ff8506512374dd9bac6275b6d",
+    "extraction": "requirements file after applying source patch"
   },
   "vllm-ascend.in": {
-    "repository": "https://github.com/GDzhu01/vllm-ascend",
-    "commit": "e67ab649500fcb21fd2139da17d0e566f7364301",
+    "repository": "https://github.com/vllm-project/vllm-ascend.git",
+    "commit": "23e286f9f4a7de13aa192c43ba894cf4e2ceabdb",
     "path": "requirements.txt",
-    "source_sha256": "31c69cf53a4fb5ecddc731e79090d35bb47e7163ce85b9fa4e6ad0bbf14e301c",
-    "extraction": "requirements file"
+    "source_sha256": "ed24bf490cb9d24855a5b2543e536bb9f673e89b5b49f8bd68dc68356ec5816f",
+    "extraction": "requirements file after applying source patch"
   }
 }

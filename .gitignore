@@ -220,6 +220,9 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Docker
-docker/v41/tests/
 docker/v41/OSS_IMPORT.md
 docker/v41/export_oss_image.py
+
+# CPU validation entry points for the shared framework backport.
+!docker/v41/tests/check_v41_cache_cpu.py
+!docker/v41/tests/check_v41_frontend_cpu.py

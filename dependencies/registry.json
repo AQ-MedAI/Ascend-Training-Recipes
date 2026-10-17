@@ -67,17 +67,26 @@
     "v41": {
       "vllm": {
         "repository": "https://github.com/vllm-project/vllm",
-        "commit": "a97dacb7106ee49f39f3d1fc6ae1800ff724e01d"
+        "commit": "0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665"
       },
       "vllm_ascend": {
-        "repository": "https://github.com/GDzhu01/vllm-ascend",
-        "commit": "e67ab649500fcb21fd2139da17d0e566f7364301"
+        "repository": "https://github.com/vllm-project/vllm-ascend",
+        "commit": "23e286f9f4a7de13aa192c43ba894cf4e2ceabdb"
       },
       "external_runtime_required": false,
-      "recipe_runtime": "workspace/rollout/dsv41/runtime"
+      "recipe_runtime": "workspace/rollout/dsv41/runtime",
+      "source_manifest": "docker/v41/sources/framework-sources.json"
     },
     "v4": {
-      "status": "pending_complete_source_and_patch_release"
+      "vllm": {
+        "repository": "https://github.com/vllm-project/vllm",
+        "commit": "0fc695fc6d1d82e9a5ac6835ac8e4e1c83703665"
+      },
+      "vllm_ascend": {
+        "repository": "https://github.com/vllm-project/vllm-ascend",
+        "commit": "23e286f9f4a7de13aa192c43ba894cf4e2ceabdb"
+      },
+      "source_manifest": "docker/v41/sources/framework-sources.json"
     },
     "k26": {
       "status": "pending_version_pin"

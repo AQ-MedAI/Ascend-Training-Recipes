@@ -40,12 +40,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
         -r /tmp/ascend-image-build/hardware-requirements.txt && \
     python3 -c 'import importlib.metadata as m; expected={"torch":"2.10.0","torch-npu":"2.10.0.post4","triton-ascend":"3.2.2","triton":"3.5.0"}; actual={k:m.version(k).split("+",1)[0] for k in expected}; assert actual == expected, (expected, actual)'
 
-# V4 may reuse --target common; this framework layer is specific to V4.1.
+# Shared V4/V4.1 framework layer; retain the target name for existing build commands.
 FROM common AS v41
 
-# This source must include the V4.1 optimizer/DDP adaptations, not just upstream HEAD.
-ARG MEGATRON_REPOSITORY=https://github.com/NVIDIA/Megatron-LM
-ARG MEGATRON_COMMIT=a845aa7e12b3a117e24c2352b9e3e60bad2e3a17
 ARG SOC_VERSION=ascend910_9382
 ARG MAX_JOBS=4
 ARG DEPENDENCY_OFFLINE=0
@@ -53,31 +50,11 @@ ARG PYTHON_DEPENDENCY_MODE=resolve
 ENV DEPENDENCY_ROOT=/opt/ascend-training \
     MEGATRON_ROOT=/opt/ascend-training/Megatron-LM \
     SOC_VERSION=${SOC_VERSION}
-RUN [[ "$MEGATRON_REPOSITORY" == https://* ]] && \
-    [[ "$MEGATRON_COMMIT" =~ ^[0-9a-f]{40}$ ]] && \
-    git init Megatron-LM && \
-    git -C Megatron-LM remote add origin "$MEGATRON_REPOSITORY" && \
-    git -C Megatron-LM fetch --depth=1 origin "$MEGATRON_COMMIT" && \
-    git -C Megatron-LM checkout --detach FETCH_HEAD && \
-    test "$(git -C Megatron-LM rev-parse HEAD)" = "$MEGATRON_COMMIT"
-
-# Reconstruct the reviewed V4.1 source tree from an upstream commit plus a local patch.
-COPY docker/v41/megatron-v41.patch docker/v41/megatron-source.json docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
-RUN python3 - <<'VERIFY_MEGATRON'
-import hashlib
-import json
-import subprocess
-from pathlib import Path
-manifest = json.loads(Path('/tmp/ascend-image-build/megatron-source.json').read_text())
-root = Path('/opt/ascend-training/Megatron-LM')
-assert subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip() == manifest['base_commit']
-patch = Path('/tmp/ascend-image-build') / manifest['patch']
-assert hashlib.sha256(patch.read_bytes()).hexdigest() == manifest['patch_sha256']
-subprocess.run(['git', '-C', str(root), 'apply', '--check', str(patch)], check=True)
-subprocess.run(['git', '-C', str(root), 'apply', str(patch)], check=True)
-for name, expected in manifest['patched_files'].items():
-    assert hashlib.sha256((root / name).read_bytes()).hexdigest() == expected, name
-VERIFY_MEGATRON
+# Reconstruct all three sibling source trees from public commits and checked patches.
+COPY docker/v41/sources/ /tmp/ascend-image-build/sources/
+COPY docker/v41/prepare_framework_sources.py docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
+RUN python3 /tmp/ascend-image-build/prepare_framework_sources.py \
+    --root /opt/ascend-training --manifest /tmp/ascend-image-build/sources/framework-sources.json
 
 # Only image-owned sources are built here; recipe forks/runtime are installed after cloning.
 COPY dependencies/registry.json /tmp/ascend-image-build/registry.json

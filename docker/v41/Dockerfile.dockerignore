@@ -12,7 +12,9 @@
 !docker/v41/hardware-constraints.txt
 !docker/v41/download_dependencies.py
 !docker/v41/native-dependencies.json
-!docker/v41/megatron-v41.patch
+!docker/v41/prepare_framework_sources.py
+!docker/v41/sources/
+!docker/v41/sources/**
 !docker/v41/megatron-source.json
 !docker/v41/Megatron-LM-LICENSE
 !docker/v41/locks/

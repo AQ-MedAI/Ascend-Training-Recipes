@@ -22,11 +22,6 @@ def main():
         actual = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
         if actual != expected:
             raise SystemExit(f"{name}: expected {expected}, found {actual}; run setup_sources.sh {args.profile}")
-    if args.profile == "v4":
-        raise SystemExit(
-            "V4 sources are pinned, but its complete image compatibility contract is not yet validated. "
-            "Do not install them into the V4.1 image automatically."
-        )
     report_dir = Path(os.environ.get("V41_IMAGE_METADATA", "/opt/ascend-training/manifest"))
     receipt = report_dir / "frameworks.json"
     if not receipt.is_file():
@@ -34,13 +29,16 @@ def main():
     info = json.loads(receipt.read_text())
     if info.get("python_environment") != "single":
         raise SystemExit("Rebuild the V4.1 image with the unified Python environment")
-    expected_rollout = registry["rollout"]["v41"]
+    expected_rollout = registry["rollout"][args.profile]
     for name, key in [("vllm", "vllm"), ("vllm-ascend", "vllm_ascend")]:
         if info[name] != expected_rollout[key]["commit"]:
             raise SystemExit(f"Image {name} commit differs from the recipe")
-    expected_megatron = json.loads((root / "docker/v41/megatron-source.json").read_text())
-    if info["megatron"] != expected_megatron:
+    expected_megatron = json.loads((root / "docker/v41/sources/framework-sources.json").read_text())
+    if info["megatron"] != expected_megatron["sources"]["Megatron-LM"]:
         raise SystemExit("Image Megatron source/patch receipt differs from the recipe")
+    expected_sources = json.loads((root / "docker/v41/sources/framework-sources.json").read_text())
+    if info.get("sources") != expected_sources:
+        raise SystemExit("Image framework sources/patches differ; rebuild the shared image")
     for name, version in {
         "torch": "2.10.0",
         "torch-npu": "2.10.0.post4",
@@ -57,10 +55,25 @@ def main():
     }.items():
         if metadata.version(name).split("+")[0] != version:
             raise SystemExit(f"{name} must be {version}")
-    engram = registry["components"]["MindSpeed-LLM"]["profiles"]["v41"]
-    path = root / "third_party/MindSpeed-LLM" / engram["required_files"][0]
-    if hashlib.sha256(path.read_bytes()).hexdigest() != engram["engram_hash_sha256"]:
-        raise SystemExit("Engram source checksum differs")
+    if args.profile == "v41":
+        dependency_root = Path(os.environ.get("DEPENDENCY_ROOT", "/opt/ascend-training"))
+        ascend_root = Path(os.environ.get("VLLM_ASCEND_ROOT", str(dependency_root / "vllm-ascend")))
+        for required in (
+            "vllm_ascend/deepseek_v41_config.py",
+            "vllm_ascend/models/deepseek_v41/engram_hash.py",
+            "vllm_ascend/core/deepseek_v41.py",
+            "vllm_ascend/attention/dsa_v41.py",
+            "vllm_ascend/patch/platform/patch_deepseek_v41_frontend/tokenizer.py",
+        ):
+            if not (ascend_root / required).is_file():
+                raise SystemExit(
+                    f"Shared framework sources lack V4.1 adaptation: {ascend_root / required}; "
+                    "rebuild the shared image with the V4.1 backport patches"
+                )
+        engram = registry["components"]["MindSpeed-LLM"]["profiles"]["v41"]
+        path = root / "third_party/MindSpeed-LLM" / engram["required_files"][0]
+        if hashlib.sha256(path.read_bytes()).hexdigest() != engram["engram_hash_sha256"]:
+            raise SystemExit("Engram source checksum differs")
     rollout_python = Path(os.environ.get("ROLLOUT_PYTHON", sys.executable))
     rollout_prefix = subprocess.check_output(
         [str(rollout_python), "-c", "import sys; print(sys.prefix)"], text=True

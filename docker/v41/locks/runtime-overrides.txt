@@ -3,3 +3,6 @@
 fastapi[standard]==0.123.10
 starlette==0.50.0
 numpy==1.26.4
+
+# Validated deployment version; override the older Ascend requirement.
+transformers==5.14.1
