@@ -5,6 +5,7 @@ The active source manifest is [dependencies/framework-sources.json](../dependenc
 - `megatron-lm/`: Megatron-LM adaptations.
 - `vllm/`: V4 baseline adaptations followed by the V4.1 backport.
 - `vllm-ascend/`: Ascend adaptations followed by the V4.1 backport.
+- `mindspeed/`: pinned upstream source with common V4 and incremental V4.1 optimizer/checkpoint patches. See [MindSpeed](mindspeed/README.md).
 - `mindspeed-llm/`: pinned upstream source with common V4 and incremental V4.1 patches. See [MindSpeed-LLM](mindspeed-llm/README.md).
 - `mbridge/`: upstream v0.15.1 plus a managed adaptation, prepared by `tools/setup_sources.sh`. See [mbridge](mbridge/README.md).
 - `megatron-lm/legacy/`: an older patch retained for provenance; not selected by the active manifest or included in the image build. Its receipt is in `dependencies/legacy/`.

@@ -1,4 +1,4 @@
-# Dependency declarations from https://github.com/AQ-MedAI/MindSpeed @ 0b2d2115f0e07f12633cef72449f6f83e05a0f21
+# Dependency declarations from Ascend/MindSpeed @ c356513e331e55d53b799cfde51c7b23901d23dc + common.patch + v41.patch
 pybind11
 ninja
 wheel

@@ -3,17 +3,16 @@
   "status": "partial_dependency_pins_not_complete_environment",
   "components": {
     "MindSpeed": {
-      "repository": "https://github.com/AQ-MedAI/MindSpeed",
+      "repository": "https://github.com/Ascend/MindSpeed.git",
       "profiles": {
         "v41": {
-          "branch": "aq/v41-integration",
-          "commit": "0b2d2115f0e07f12633cef72449f6f83e05a0f21"
+          "commit": "c356513e331e55d53b799cfde51c7b23901d23dc"
         },
         "v4": {
-          "branch": "aq/v4-integration",
-          "commit": "dcfc6c22b04a4c966d05e128421959f60e0e80c2"
+          "commit": "c356513e331e55d53b799cfde51c7b23901d23dc"
         }
-      }
+      },
+      "source_manifest": "dependencies/mindspeed-sources.json"
     },
     "MindSpeed-LLM": {
       "repository": "https://github.com/Ascend/MindSpeed-LLM.git",

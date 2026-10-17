@@ -10,7 +10,7 @@
 
 基础标签来自 [verl 上游 Dockerfile](https://github.com/verl-project/verl/blob/main/docker/ascend/Dockerfile.ascend_9.1.0_a3_v0.9.1)：`swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12`。正式发布仍需固定目标架构 digest。CANN/ATB、编译器及驱动配套须验收。当前构建目标沿用 `ascend910_9382`，与上游示例的 `9392` 不同，需按实际芯片确认。
 
-镜像构建不会克隆、安装两个 AQ-MedAI fork 和上游 MindSpeed-LLM、mbridge，也不复制 recipe runtime。三个框架统一从 `dependencies/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
+镜像构建不会克隆、安装verl fork 和上游 MindSpeed、MindSpeed-LLM、mbridge，也不复制 recipe runtime。三个框架统一从 `dependencies/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
 
 ## 固定框架
 

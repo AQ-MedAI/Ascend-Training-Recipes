@@ -1,6 +1,6 @@
 [submodule "MindSpeed"]
 	path = third_party/MindSpeed
-	url = https://github.com/AQ-MedAI/MindSpeed.git
+	url = https://github.com/Ascend/MindSpeed.git
 [submodule "MindSpeed-LLM"]
 	path = third_party/MindSpeed-LLM
 	url = https://github.com/Ascend/MindSpeed-LLM.git

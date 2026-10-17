@@ -1,0 +1,133 @@
+diff --git a/mindspeed/core/megatron_basic/megatron_basic.py b/mindspeed/core/megatron_basic/megatron_basic.py
+index 0c5528b01610206c6b40412d83f8746ab7824b48..8c3f2ef1d6d9c6f5bbc81c1d8fe27ce5f3e9297e 100644
+--- a/mindspeed/core/megatron_basic/megatron_basic.py
++++ b/mindspeed/core/megatron_basic/megatron_basic.py
+@@ -132,7 +132,6 @@ def get_device_arch_version():
+     return 8
+ 
+ 
+-@staticmethod
+ def preload_tensors(write_buckets, non_blocking=True):
+     """
+     Preloads tensors in `state_dict` to host memory via CPU memory.
+diff --git a/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py b/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py
+index 86707db54fdf5b96645230092213d0396ed01503..6718445724fa89b0e12d2a1dde7753ca39c3d7a4 100644
+--- a/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py
++++ b/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py
+@@ -70,6 +70,33 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+             for main_param in group:
+                 self.init_param_opt_state(main_param)
+ 
++    def _get_main_param_for_model_param(self, model_param):
++        """Return the optimizer shard paired with ``model_param``.
++
++        ``model_param_group_index_map`` describes the optimizer groups before
++        wrappers are allowed to rebuild them.  The paired model/main-param
++        lists are created together from the grad-buffer ranges and remain the
++        authoritative mapping afterwards.
++        """
++        model_to_main_param = getattr(self, "_model_param_to_main_param_map", None)
++        if model_to_main_param is None:
++            model_to_main_param = {}
++            for model_group, main_group in zip(
++                self.model_float16_groups, self.shard_fp32_from_float16_groups
++            ):
++                model_to_main_param.update(
++                    {id(model): main for model, main in zip(model_group, main_group)}
++                )
++            for model_group, main_group in zip(self.model_fp32_groups, self.shard_fp32_groups):
++                model_to_main_param.update(
++                    {id(model): main for model, main in zip(model_group, main_group)}
++                )
++            self._model_param_to_main_param_map = model_to_main_param
++        try:
++            return model_to_main_param[id(model_param)]
++        except KeyError as exc:
++            raise KeyError("model parameter has no paired optimizer shard") from exc
++
+     def init_param_opt_state(self, main_param):
+         device_state = self.optimizer.state[main_param]
+         cpu_state = self.param_to_cpu_states_map[main_param]
+@@ -258,7 +285,7 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+ 
+                 # fp32 params.
+                 elif model_param.type() == 'torch.cuda.FloatTensor':
+-                    shard_model_param = model_param.view(-1)[param_range.start : param_range.end]
++                    shard_model_param = model_param.detach().view(-1)[param_range.start : param_range.end]
+                     model_fp32_params_this_group.append(model_param)
+                     shard_fp32_params_this_group.append(shard_model_param)
+                     tensor_parallel.copy_tensor_model_parallel_attributes(shard_model_param, model_param)
+@@ -384,8 +411,7 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+                     if self.ddp_config.use_custom_fsdp or self.config.use_precision_aware_optimizer:
+                         self._set_main_param_and_optimizer_states(model_param, tensors)
+                     else:
+-                        group_index, group_order = self.model_param_group_index_map[model_param]
+-                        main_param = self.optimizer.param_groups[group_index]["params"][group_order]
++                        main_param = self._get_main_param_for_model_param(model_param)
+                         optim_state = self.optimizer.state[main_param]
+                         dst_tensors = {"param": main_param, **optim_state}
+ 
+@@ -415,6 +441,12 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+         - Gather contiguous buffers on DP rank 0 and concatenate to world
+           buffers.
+         """
++        # Optimizer step copies swapped parameters and Adam states back to
++        # pinned CPU memory asynchronously. Checkpointing reads those CPU
++        # tensors directly, so make their latest contents visible first.
++        if self.swap_to_host_stream is not None:
++            self.swap_to_host_stream.synchronize()
++
+         if self.ddp_config.use_custom_fsdp:
+             state = {"buckets_coalesced": True}
+             for model_chunk in self.model_chunks:
+@@ -480,18 +512,34 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+ 
+                     # Build contiguous DP rank shards (for param + optim states).
+                     for model_param, param_range_map in gbuf_range_map["param_map"].items():
+-                        group_index, group_order = self.model_param_group_index_map[model_param]
+-                        main_param = self.optimizer.param_groups[group_index]["params"][group_order]
++                        main_param = self._get_main_param_for_model_param(model_param)
+ 
+                         if main_param in self.param_to_cpu_states_map:
+-                            tensors = self.param_to_cpu_states_map[main_param]
++                            # FP32 parameters are marked no-swap and therefore
++                            # have no ``param`` entry in the CPU state map. The
++                            # parameter itself remains resident on device; use
++                            # it while keeping swapped BF16 parameters backed
++                            # by their authoritative CPU copy.
++                            tensors = {
++                                'param': main_param,
++                                **self.param_to_cpu_states_map[main_param],
++                            }
+                         else:
+                             tensors = self._get_main_param_and_optimizer_states(model_param)
+ 
+                         # Copy states into contiguous shard.
+                         gbuf_local_start = param_range_map["gbuf_local"].start
+                         gbuf_local_end = param_range_map["gbuf_local"].end
++                        expected_numel = gbuf_local_end - gbuf_local_start
+                         for key in local_shards:
++                            if tensors[key].numel() != expected_numel:
++                                raise RuntimeError(
++                                    "MindSpeed swap checkpoint tensor size mismatch: "
++                                    f"key={key}, expected={expected_numel}, "
++                                    f"actual={tensors[key].numel()}, "
++                                    f"model_shape={tuple(model_param.shape)}, "
++                                    f"main_shape={tuple(main_param.shape)}"
++                                )
+                             local_shards[key][gbuf_local_start:gbuf_local_end].data.copy_(tensors[key].detach().cpu())
+ 
+                     # Gather contiguous shards on DP rank 0.
+diff --git a/mindspeed/features_manager/megatron_basic/megatron_basic.py b/mindspeed/features_manager/megatron_basic/megatron_basic.py
+index 8b4e9c29a4f08b06b01fd69ac2a23703fb1033bf..e18ab4ea724733f513227e8bb412219d43f21553 100644
+--- a/mindspeed/features_manager/megatron_basic/megatron_basic.py
++++ b/mindspeed/features_manager/megatron_basic/megatron_basic.py
+@@ -111,7 +111,7 @@ class MegatronBasicFeature(MindSpeedFeature):
+ 
+         pm.register_patch(
+             'megatron.core.dist_checkpointing.strategies.filesystem_async.FileSystemWriterAsync.preload_tensors',
+-            preload_tensors,
++            staticmethod(preload_tensors),
+         )
+ 
+         # avoid incorrect weight_decay override in resume task

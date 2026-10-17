@@ -1,10 +1,12 @@
 {
   "mindspeed.in": {
-    "repository": "https://github.com/AQ-MedAI/MindSpeed",
-    "commit": "0b2d2115f0e07f12633cef72449f6f83e05a0f21",
+    "repository": "https://github.com/Ascend/MindSpeed.git",
+    "commit": "c356513e331e55d53b799cfde51c7b23901d23dc",
     "path": "requirements.txt",
     "source_sha256": "dd4abca4fa3dae4b2d19bfad2e703ebd40e29448257a761da023d8ac1295681b",
-    "extraction": "requirements file"
+    "extraction": "requirements file after applying common.patch and v41.patch",
+    "source_manifest": "dependencies/mindspeed-sources.json",
+    "profile": "v41"
   },
   "mindspeed-llm.in": {
     "repository": "https://github.com/Ascend/MindSpeed-LLM.git",

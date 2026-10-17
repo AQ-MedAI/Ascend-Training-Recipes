@@ -1,0 +1,195 @@
+diff --git a/mindspeed/core/megatron_basic/get_megatron_optimizer.py b/mindspeed/core/megatron_basic/get_megatron_optimizer.py
+index a613dfd7e481470c2a453eeff0807fcae6f7a809..78a4e7e71faa23b1fc34f535ae1e5a4d8537d3c4 100644
+--- a/mindspeed/core/megatron_basic/get_megatron_optimizer.py
++++ b/mindspeed/core/megatron_basic/get_megatron_optimizer.py
+@@ -44,6 +44,7 @@ def get_megatron_optimizer(
+         Instance of MegatronOptimizer.
+     """
+ 
++    from megatron.core.optimizer import _get_rank_owned_optimizer
+     args = get_full_args()
+     log_single_rank(logger, logging.INFO, f'Setting up optimizer with config {config}')
+ 
+@@ -115,7 +116,7 @@ def get_megatron_optimizer(
+             no_weight_decay_cond=no_weight_decay_cond,
+             scale_lr_cond=scale_lr_cond,
+             lr_mult=lr_mult,
+-            filter_fn=lambda g: not g['is_expert_parallel'],
++            filter_fn=lambda g: not g['is_expert_parallel'] and not g.get('is_rank_owned', False),
+             buffer_name='buffers',
+         )
+         for model_chunk in dense_model_chunks:
+@@ -147,6 +148,12 @@ def get_megatron_optimizer(
+         )
+         model_chunk_offset += 1
+ 
++    owner_optimizer = _get_rank_owned_optimizer(config, model_chunks,
++        no_weight_decay_cond, scale_lr_cond, lr_mult,
++        use_gloo_process_groups and not args.disable_gloo_group)
++    if owner_optimizer is not None:
++        optimizers.append(owner_optimizer)
++
+     moe_param_groups, moe_buffers = _get_param_groups_and_buffers(
+         model_chunks,
+         model_chunk_offset=0,
+@@ -154,7 +161,7 @@ def get_megatron_optimizer(
+         no_weight_decay_cond=no_weight_decay_cond,
+         scale_lr_cond=scale_lr_cond,
+         lr_mult=lr_mult,
+-        filter_fn=lambda g: g['is_expert_parallel'],
++        filter_fn=lambda g: g['is_expert_parallel'] and not g.get('is_rank_owned', False),
+         buffer_name='expert_parallel_buffers',
+     )
+     if len(moe_param_groups) > 0:
+diff --git a/mindspeed/core/optimizer/fix_duplicate_allgather.py b/mindspeed/core/optimizer/fix_duplicate_allgather.py
+index 64a5d328a37662408611b4922fecd20359df7897..dd18275b36ecc44e188674ba7ba60476e721657d 100644
+--- a/mindspeed/core/optimizer/fix_duplicate_allgather.py
++++ b/mindspeed/core/optimizer/fix_duplicate_allgather.py
+@@ -27,9 +27,11 @@ def start_param_sync(self, *unused, force_sync: bool = False, force_dispatch: bo
+             return
+ 
+     if dense_or_moe_group is None:
+-        bucket_groups = self.bucket_groups + self.expert_parallel_bucket_groups
++        bucket_groups = self.bucket_groups + self.expert_parallel_bucket_groups + getattr(self, "owner_bucket_groups", [])
+     elif dense_or_moe_group == 'dense':
+         bucket_groups = self.bucket_groups
++    elif dense_or_moe_group == 'owned':
++        bucket_groups = self.owner_bucket_groups
+     elif dense_or_moe_group == 'moe':
+         bucket_groups = self.expert_parallel_bucket_groups
+ 
+@@ -75,7 +77,7 @@ def get_megatron_optimizer_wrapper(func):
+                 return chained_optimizer
+         
+             for optimizer in chained_optimizer.chained_optimizers:
+-                optimizer.is_moe_param = 'dense'
++                optimizer.is_moe_param = 'owned' if getattr(optimizer, 'is_rank_owned_optimizer', False) else 'dense'
+ 
+             is_expert_parallel = False
+             for model_chunk in model_chunks:
+diff --git a/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py b/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py
+index 6718445724fa89b0e12d2a1dde7753ca39c3d7a4..25ccc1c2f63482c723f67a2845bdae7062baceee 100644
+--- a/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py
++++ b/mindspeed/core/optimizer/swap_optimizer/swap_optimizer.py
+@@ -431,6 +431,41 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+                 self.optimizer.param_to_group_map[p] = group
+         return None
+ 
++    def _get_main_param_and_optimizer_states(self, model_param):
++        """Expose authoritative swap states to MCore's tensor checkpoint path."""
++        main_param = self._get_main_param_for_model_param(model_param)
++        if main_param not in self.param_to_cpu_states_map:
++            return super()._get_main_param_and_optimizer_states(model_param)
++        states = {"param": main_param, **self.param_to_cpu_states_map[main_param]}
++        # Disabled AMSGrad has a None placeholder, not a checkpoint tensor.
++        return {key: value for key, value in states.items() if value is not None}
++
++    def _set_main_param_and_optimizer_states(self, model_param, tensors):
++        main_param = self._get_main_param_for_model_param(model_param)
++        if main_param not in self.param_to_cpu_states_map:
++            return super()._set_main_param_and_optimizer_states(model_param, tensors)
++        destinations = self._get_main_param_and_optimizer_states(model_param)
++        with torch.no_grad():
++            for key, destination in destinations.items():
++                if key == "step" and key not in tensors:
++                    continue
++                destination.copy_(tensors[key])
++
++    def load_state_dict(self, state_dict):
++        result = super().load_state_dict(state_dict)
++        # Adam load_state_dict replaces group dictionaries. Swap kernels must
++        # use restored hyperparameters, also for model-space checkpoint loads.
++        for group in self.optimizer.param_groups:
++            for param in group['params']:
++                self.optimizer.param_to_group_map[param] = group
++        return result
++
++    def sharded_state_dict(self, *args, **kwargs):
++        # Complete asynchronous D2H writes before exposing CPU state views.
++        if self.swap_to_host_stream is not None:
++            self.swap_to_host_stream.synchronize()
++        return super().sharded_state_dict(*args, **kwargs)
++
+     def get_parameter_state_dp_zero(self):
+         """Get parameter state (i.e., parameter & optimizer tensors).
+ 
+@@ -505,10 +540,22 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+                     gbuf_world_numel_unpadded = self.buffers[gbuf_idx].buckets[bucket_idx].numel_unpadded
+                     assert gbuf_world_numel_unpadded <= gbuf_world_numel
+ 
+-                    local_shards = {
+-                        key: torch.zeros((gbuf_local_numel,), dtype=torch.float32, device="cpu")
+-                        for key in ("param", "exp_avg", "exp_avg_sq")
+-                    }
++                    if data_parallel_world_size == 1:
++                        # Assemble directly into the checkpoint buffer. Keep a
++                        # snapshot independent of live optimizer state, without
++                        # local/gather/cat copies or padded bucket storage.
++                        local_shards = {
++                            key: world_tensors[key][
++                                offset_in_world_tensors:
++                                offset_in_world_tensors + gbuf_world_numel_unpadded
++                            ]
++                            for key in ("param", "exp_avg", "exp_avg_sq")
++                        }
++                    else:
++                        local_shards = {
++                            key: torch.zeros((gbuf_local_numel,), dtype=torch.float32, device="cpu")
++                            for key in ("param", "exp_avg", "exp_avg_sq")
++                        }
+ 
+                     # Build contiguous DP rank shards (for param + optim states).
+                     for model_param, param_range_map in gbuf_range_map["param_map"].items():
+@@ -542,6 +589,10 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+                                 )
+                             local_shards[key][gbuf_local_start:gbuf_local_end].data.copy_(tensors[key].detach().cpu())
+ 
++                    if data_parallel_world_size == 1:
++                        offset_in_world_tensors += gbuf_world_numel_unpadded
++                        continue
++
+                     # Gather contiguous shards on DP rank 0.
+                     for key, send_tensor in local_shards.items():
+                         # Gather tensor list.
+@@ -561,15 +612,20 @@ class SwapDistributedOptimizer(MegatronDistributedOptimizer):
+                             data_parallel_group_gloo,
+                         )
+ 
+-                        # Concatenate.
++                        # Copy each received shard directly, dropping bucket
++                        # padding without allocating a concatenated tensor.
+                         if data_parallel_rank == 0:
+-                            recv_tensors_concatenated = torch.cat(recv_tensors)
+-                            # Copy this bucket's collected all-gather tensors into the right place
+-                            # in the tensor for the buffer. The tensor for the buffer gets rid of
+-                            # the padding between buckets.
+-                            start = offset_in_world_tensors
+-                            end = offset_in_world_tensors + gbuf_world_numel_unpadded
+-                            world_tensors[key][start:end].copy_(recv_tensors_concatenated[:gbuf_world_numel_unpadded])
++                            for shard_rank, received in enumerate(recv_tensors):
++                                shard_start = shard_rank * gbuf_local_numel
++                                count = min(gbuf_local_numel, gbuf_world_numel_unpadded - shard_start)
++                                if count <= 0:
++                                    break
++                                start = offset_in_world_tensors + shard_start
++                                world_tensors[key][start:start + count].copy_(received[:count])
++                            del received
++                        # Do not retain the previous gather's buffers while
++                        # allocating the next set.
++                        del recv_tensors
+ 
+                     offset_in_world_tensors += gbuf_world_numel_unpadded
+ 
+diff --git a/requirements.txt b/requirements.txt
+index c60aaa897e16123df6b74ff0ffd47be47d076f6e..4c45586a62c19c90d0ef718d1029c87d5a045846 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,7 +1,7 @@
+ pybind11
+ ninja
+ wheel
+-numpy<=1.26.0
++numpy==1.26.4
+ six
+ regex
+ psutil
