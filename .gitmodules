@@ -3,7 +3,7 @@
 	url = https://github.com/AQ-MedAI/MindSpeed.git
 [submodule "MindSpeed-LLM"]
 	path = third_party/MindSpeed-LLM
-	url = https://github.com/AQ-MedAI/MindSpeed-LLM.git
+	url = https://github.com/Ascend/MindSpeed-LLM.git
 [submodule "mbridge"]
 	path = third_party/mbridge
 	url = https://github.com/ISEEKYAN/mbridge.git

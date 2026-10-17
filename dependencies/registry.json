@@ -16,21 +16,20 @@
       }
     },
     "MindSpeed-LLM": {
-      "repository": "https://github.com/AQ-MedAI/MindSpeed-LLM",
+      "repository": "https://github.com/Ascend/MindSpeed-LLM.git",
       "profiles": {
         "v41": {
-          "branch": "aq/v41-integration",
-          "commit": "794171eace3cfa2c1cd13ade80d4232ccd5084b1",
+          "commit": "53ff1095801f9ce14b14be3e62739e742f8b9067",
           "required_files": [
             "mindspeed_llm/tasks/models/transformer/deepseek41/engram_hash.py"
           ],
           "engram_hash_sha256": "11f35ecbead8150c35aa002b3d180ef290b05a25afe883a11884f94d476d3897"
         },
         "v4": {
-          "branch": "aq/v41-integration",
-          "commit": "7ffccdc3fdea5f8eb25b5ce88aa0d45f9faa5042"
+          "commit": "53ff1095801f9ce14b14be3e62739e742f8b9067"
         }
-      }
+      },
+      "source_manifest": "dependencies/mindspeed-llm-sources.json"
     },
     "mbridge": {
       "repository": "https://github.com/ISEEKYAN/mbridge.git",

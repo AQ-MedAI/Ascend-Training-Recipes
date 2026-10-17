@@ -1,4 +1,4 @@
-# Dependency declarations from https://github.com/AQ-MedAI/MindSpeed-LLM @ 794171eace3cfa2c1cd13ade80d4232ccd5084b1
+# Dependency declarations from Ascend/MindSpeed-LLM @ 53ff1095801f9ce14b14be3e62739e742f8b9067 + common.patch + v41.patch
 numpy
 transformers==5.14.1
 scipy

@@ -1,10 +1,11 @@
-"""Apply and verify recipe-managed patches on upstream submodules."""
+"""Apply and switch verified patch profiles on upstream submodules."""
 
 import hashlib
 import json
 import subprocess
+from pathlib import Path
 
-from prepare_framework_sources import verify
+from prepare_framework_sources import manifest_sources, patch_specs, verify
 
 
 def git(checkout, *args):
@@ -13,46 +14,74 @@ def git(checkout, *args):
 
 def load_source(root, name, component, profile):
     manifest = root / component["source_manifest"]
-    source = json.loads(manifest.read_text())["sources"][name]
+    source = manifest_sources(json.loads(manifest.read_text()), profile)[name]
     if source["commit"] != component["profiles"][profile]["commit"] or source["repository"] != component["repository"]:
         raise RuntimeError(f"Registry and patch manifest disagree: {name}")
-    patch = (manifest.parent / source["patch"]).resolve()
-    if hashlib.sha256(patch.read_bytes()).hexdigest() != source["patch_sha256"]:
-        raise RuntimeError(f"Patch checksum mismatch: {patch}")
-    return source, patch
+    patches = []
+    for filename, checksum in patch_specs(source):
+        patch = (manifest.parent / filename).resolve()
+        if hashlib.sha256(patch.read_bytes()).hexdigest() != checksum:
+            raise RuntimeError(f"Patch checksum mismatch: {patch}")
+        patches.append(patch)
+    return source, patches
+
+
+def inspect_checkout(checkout, sources):
+    """Return the matching profile index, or None for an unmodified checkout."""
+    if not (checkout / ".git").exists():
+        return None
+    if git(checkout, "diff", "--cached", "--name-only"):
+        raise RuntimeError(f"Staged changes in {checkout}; preserve them before updating sources")
+    if not git(checkout, "status", "--porcelain"):
+        return None
+    head = git(checkout, "rev-parse", "HEAD").strip()
+    for index, source in enumerate(sources):
+        if head != source["commit"]:
+            continue
+        try:
+            verify(checkout, source, tracked=True)
+            return index
+        except (RuntimeError, OSError):
+            pass
+    raise RuntimeError(f"Local changes differ from every managed profile: {checkout}; preserve them before updating")
 
 
 def is_prepared(checkout, source):
-    """Accept exactly our patched tree; refuse any other local modifications."""
-    if not (checkout / ".git").exists():
-        return False
-    staged = git(checkout, "diff", "--cached", "--name-only")
-    if staged:
-        raise RuntimeError(f"Staged changes in {checkout}; preserve them before updating sources")
-    dirty = git(checkout, "status", "--porcelain")
-    if dirty:
-        if git(checkout, "rev-parse", "HEAD").strip() != source["commit"]:
-            raise RuntimeError(f"Local changes on an unexpected base: {checkout}")
-        try:
-            verify(checkout, source, tracked=True)
-        except (RuntimeError, OSError) as exc:
-            raise RuntimeError(
-                f"Local changes differ from the managed patch: {checkout}; preserve them before updating"
-            ) from exc
-        return True
-    return False
+    return inspect_checkout(checkout, [source]) == 0
 
 
-def ensure_source(checkout, source, patch):
-    if is_prepared(checkout, source):
+def ensure_source(checkout, source, patches, alternatives=()):
+    candidates = [(source, patches), *alternatives]
+    matched = inspect_checkout(checkout, [entry[0] for entry in candidates])
+    if matched == 0:
         return
+    # Fetch first, so a connection failure cannot remove the installed profile.
     exists = subprocess.run(
-        ["git", "-C", str(checkout), "cat-file", "-e", source["commit"] + "^{commit}"], capture_output=True
+        ["git", "-C", str(checkout), "cat-file", "-e", source["commit"] + "^{commit}"],
+        capture_output=True,
     )
     if exists.returncode:
         git(checkout, "fetch", "--no-tags", "origin", source["commit"])
+    if matched is not None:
+        old_source, old_patches = candidates[matched]
+        if isinstance(old_patches, Path):
+            old_patches = [old_patches]
+        # Inventory verification above authorizes removal only of known patch edits.
+        for patch in reversed(old_patches):
+            git(checkout, "apply", "--reverse", "--check", str(patch))
+            git(checkout, "apply", "--reverse", str(patch))
+        reference = {"files": old_source["reference_files"]}
+        if "gitlinks" in old_source:
+            reference["gitlinks"] = old_source["gitlinks"]
+        verify(checkout, reference, tracked=True)
     git(checkout, "checkout", "--detach", source["commit"])
-    verify(checkout, {"files": source["reference_files"]}, tracked=True)
-    git(checkout, "apply", "--check", str(patch))
-    git(checkout, "apply", str(patch))
+    reference = {"files": source["reference_files"]}
+    if "gitlinks" in source:
+        reference["gitlinks"] = source["gitlinks"]
+    verify(checkout, reference, tracked=True)
+    if isinstance(patches, Path):
+        patches = [patches]
+    for patch in patches:
+        git(checkout, "apply", "--check", str(patch))
+        git(checkout, "apply", str(patch))
     verify(checkout, source, tracked=True)

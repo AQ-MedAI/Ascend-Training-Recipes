@@ -7,11 +7,13 @@
     "extraction": "requirements file"
   },
   "mindspeed-llm.in": {
-    "repository": "https://github.com/AQ-MedAI/MindSpeed-LLM",
-    "commit": "794171eace3cfa2c1cd13ade80d4232ccd5084b1",
+    "repository": "https://github.com/Ascend/MindSpeed-LLM.git",
+    "commit": "53ff1095801f9ce14b14be3e62739e742f8b9067",
     "path": "requirements.txt",
     "source_sha256": "d8231d60c554d6f5ec59af2349ff45254f77f4285449f23b252b2da65725e0af",
-    "extraction": "requirements file"
+    "extraction": "requirements file after applying common.patch and v41.patch",
+    "source_manifest": "dependencies/mindspeed-llm-sources.json",
+    "profile": "v41"
   },
   "verl.in": {
     "repository": "https://github.com/AQ-MedAI/verl",

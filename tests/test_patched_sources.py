@@ -85,6 +85,52 @@ class PatchedSourceTest(unittest.TestCase):
             load_source(self.root, "mbridge", component, "v41")
         self.assertEqual((self.repo / "model.py").read_text(), "base\n")
 
+    def make_second_profile(self):
+        import copy
+
+        ensure_source(self.repo, self.source, self.patch)
+        self.git("add", ".")
+        (self.repo / "model.py").write_text("v41 adapted\n")
+        (self.repo / "engram.py").write_text("hash implementation\n")
+        self.git("add", "-N", "engram.py")
+        extra = self.root / "v41.patch"
+        extra.write_text(self.git("diff", "--binary"))
+        second = copy.deepcopy(self.source)
+        second["files"] = self.inventory()
+        self.git("reset", "-q", "HEAD")
+        (self.repo / "engram.py").unlink()
+        (self.repo / "model.py").write_text("adapted\n")
+        return second, [self.patch, extra]
+
+    def test_profile_round_trip(self):
+        second, patches = self.make_second_profile()
+        for _ in range(2):
+            ensure_source(self.repo, second, patches, [(self.source, [self.patch])])
+            self.assertTrue(is_prepared(self.repo, second))
+            self.assertTrue((self.repo / "engram.py").exists())
+            ensure_source(self.repo, self.source, [self.patch], [(second, patches)])
+            self.assertFalse((self.repo / "engram.py").exists())
+            self.assertTrue(is_prepared(self.repo, self.source))
+
+    def test_switch_preserves_extra_edit(self):
+        second, patches = self.make_second_profile()
+        (self.repo / "user.py").write_text("user content")
+        with self.assertRaisesRegex(RuntimeError, "Local changes"):
+            ensure_source(self.repo, second, patches, [(self.source, [self.patch])])
+        self.assertEqual((self.repo / "user.py").read_text(), "user content")
+        self.assertEqual((self.repo / "model.py").read_text(), "adapted\n")
+
+    def test_gitlink_inventory(self):
+        from prepare_framework_sources import verify
+
+        commit = self.source["commit"]
+        self.git("update-index", "--add", "--cacheinfo", f"160000,{commit},vendor/nested")
+        baseline = {"files": self.source["reference_files"], "gitlinks": {"vendor/nested": commit}}
+        verify(self.repo, baseline, tracked=True)
+        baseline["gitlinks"] = {}
+        with self.assertRaisesRegex(RuntimeError, "Nested submodule pins"):
+            verify(self.repo, baseline, tracked=True)
+
 
 if __name__ == "__main__":
     unittest.main()

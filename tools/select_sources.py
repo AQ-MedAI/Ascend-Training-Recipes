@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from patched_sources import ensure_source, is_prepared, load_source
+from patched_sources import ensure_source, inspect_checkout, load_source
 
 
 def main():
@@ -25,8 +25,13 @@ def main():
         checkout = root / "third_party" / name
         if component.get("source_manifest"):
             source, patch = load_source(root, name, component, args.profile)
-            is_prepared(checkout, source)
-            patched[name] = (source, patch)
+            alternatives = [
+                load_source(root, name, component, profile)
+                for profile in component["profiles"]
+                if profile != args.profile
+            ]
+            inspect_checkout(checkout, [source, *(entry[0] for entry in alternatives)])
+            patched[name] = (source, patch, alternatives)
         elif (checkout / ".git").exists():
             dirty = subprocess.check_output(["git", "-C", str(checkout), "status", "--porcelain"], text=True)
             if dirty:
@@ -34,13 +39,31 @@ def main():
     git("submodule", "sync", "--", *paths)
     plain_paths = ["third_party/" + name for name in components if name not in patched]
     if plain_paths:
-        git("-c", "submodule.recurse=false", "submodule", "update", "--init", "--checkout", "--", *plain_paths)
+        git(
+            "-c",
+            "submodule.recurse=false",
+            "submodule",
+            "update",
+            "--init",
+            "--checkout",
+            "--",
+            *plain_paths,
+        )
     for name, component in components.items():
         path = "third_party/" + name
         checkout = root / path
         if name in patched:
             if not (checkout / ".git").exists():
-                git("-c", "submodule.recurse=false", "submodule", "update", "--init", "--checkout", "--", path)
+                git(
+                    "-c",
+                    "submodule.recurse=false",
+                    "submodule",
+                    "update",
+                    "--init",
+                    "--checkout",
+                    "--",
+                    path,
+                )
             ensure_source(checkout, *patched[name])
             continue
         sha = component["profiles"][args.profile]["commit"]
@@ -48,7 +71,7 @@ def main():
         if exists.returncode:
             git("-C", path, "fetch", "--no-tags", "origin", sha)
         git("-C", path, "checkout", "--detach", sha)
-    print(f"Sources selected: {args.profile}. mbridge uses its upstream pin plus a verified patch.")
+    print(f"Sources selected: {args.profile}. Upstream submodules use verified profile patches.")
 
 
 if __name__ == "__main__":

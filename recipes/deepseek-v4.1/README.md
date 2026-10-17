@@ -52,4 +52,4 @@ Engram hash 随 MindSpeed-LLM 的 V4.1 模型源码提供：`mindspeed_llm/tasks
 
 ### 默认框架目录
 
-先按[主 README](../../README.md#拉取源码)运行 `tools/setup_sources.sh` 初始化四个子模块。两个 V4.1 启动脚本默认从仓库的 `third_party/` 加载四个源码依赖；`DEPENDENCY_ROOT` 用于镜像中的框架和算子，四个框架路径可分别通过 `*_ROOT` 覆盖。MindSpeed-LLM 已固定包含 Engram 的提交，详见[依赖说明](../../docs/DEPENDENCIES.md#子模块与版本更新)。
+先按[主 README](../../README.md#拉取源码)运行 `tools/setup_sources.sh` 初始化四个子模块。两个 V4.1 启动脚本默认从仓库的 `third_party/` 加载四个源码依赖；`DEPENDENCY_ROOT` 用于镜像中的框架和算子，四个框架路径可分别通过 `*_ROOT` 覆盖。MindSpeed-LLM 的固定上游基线与 V4.1 补丁共同提供 Engram，详见[依赖说明](../../docs/DEPENDENCIES.md#子模块与版本更新)。
