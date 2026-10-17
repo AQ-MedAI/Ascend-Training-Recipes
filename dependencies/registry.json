@@ -43,21 +43,19 @@
       "source_manifest": "dependencies/mbridge-sources.json"
     },
     "verl": {
-      "repository": "https://github.com/AQ-MedAI/verl",
+      "repository": "https://github.com/verl-project/verl.git",
       "profiles": {
         "v41": {
-          "branch": "aq/v41-integration",
-          "commit": "c73f779e4d6ebbf6172c3b020e47b3fd2f346d52"
+          "commit": "809f2d8f59910dfd3a96745b68119829650250a0"
         },
         "v4": {
-          "branch": "aq/v4-integration",
-          "commit": "e001090e88532bda2d4264bb806bc914fe7c6822"
+          "commit": "809f2d8f59910dfd3a96745b68119829650250a0"
         },
         "k26": {
-          "branch": "aq/k26-integration",
-          "commit": "be9a6dc3a01cadea0035fcb3e105eb665209d05e"
+          "commit": "bee9f6f4bb1de784781e296f165b4c22d6c26cc1"
         }
-      }
+      },
+      "source_manifest": "dependencies/verl-sources.json"
     }
   },
   "rollout": {

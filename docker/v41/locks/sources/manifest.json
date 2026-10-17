@@ -18,11 +18,13 @@
     "profile": "v41"
   },
   "verl.in": {
-    "repository": "https://github.com/AQ-MedAI/verl",
-    "commit": "c73f779e4d6ebbf6172c3b020e47b3fd2f346d52",
+    "repository": "https://github.com/verl-project/verl.git",
+    "commit": "809f2d8f59910dfd3a96745b68119829650250a0",
     "path": "setup.py",
     "source_sha256": "ecdbe4dd362dcb578b8fbea5a56586ca89ef8822b2d992ed4d86e4268d5135ab",
-    "extraction": "install_requires literal"
+    "extraction": "install_requires literal after applying v4.patch and v41.patch",
+    "source_manifest": "dependencies/verl-sources.json",
+    "profile": "v41"
   },
   "megatron.in": {
     "repository": "https://github.com/NVIDIA/Megatron-LM",

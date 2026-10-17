@@ -35,7 +35,7 @@ docker build --platform linux/arm64 --target v41 \
   -f docker/v41/Dockerfile -t ascend-training-v41:dev .
 ```
 
-源码框架和 recipe fork 始终以 `--no-deps --no-build-isolation` 安装。硬件基础层和构建工具仍按各自约束安装，不受上面运行依赖安装模式影响。
+源码框架和 recipe 源码依赖 始终以 `--no-deps --no-build-isolation` 安装。硬件基础层和构建工具仍按各自约束安装，不受上面运行依赖安装模式影响。
 
 ## 锁文件生成
 

@@ -5,26 +5,26 @@
 | 配置 | 仓库 | 源码方案 | 固定提交 |
 | --- | --- | --- | --- |
 | v41 | [MindSpeed](https://github.com/Ascend/MindSpeed) | 上游 + common.patch + v41.patch | `c356513e331e55d53b799cfde51c7b23901d23dc` |
-| v4 | [MindSpeed](https://github.com/Ascend/MindSpeed) | 上游 + common.patch | `c356513e331e55d53b799cfde51c7b23901d23dc` |
+| v4 | [MindSpeed](https://github.com/Ascend/MindSpeed) | 上游 + common.patch + v41.patch | `c356513e331e55d53b799cfde51c7b23901d23dc` |
 | v41 | [MindSpeed-LLM](https://github.com/Ascend/MindSpeed-LLM) | 上游 + common.patch + v41.patch | `53ff1095801f9ce14b14be3e62739e742f8b9067` |
-| v4 | [MindSpeed-LLM](https://github.com/Ascend/MindSpeed-LLM) | 上游 + common.patch | `53ff1095801f9ce14b14be3e62739e742f8b9067` |
+| v4 | [MindSpeed-LLM](https://github.com/Ascend/MindSpeed-LLM) | 上游 + common.patch + v41.patch | `53ff1095801f9ce14b14be3e62739e742f8b9067` |
 | v41 | [mbridge](https://github.com/ISEEKYAN/mbridge) | 上游 v0.15.1 + patch | `0cd4ae23f2425da77a80cb3f517828452fa8e984` |
 | v4 | [mbridge](https://github.com/ISEEKYAN/mbridge) | 上游 v0.15.1 + patch | `0cd4ae23f2425da77a80cb3f517828452fa8e984` |
-| v41 | [verl](https://github.com/AQ-MedAI/verl) | `aq/v41-integration` | `c73f779e4d6ebbf6172c3b020e47b3fd2f346d52` |
-| v4 | [verl](https://github.com/AQ-MedAI/verl) | `aq/v4-integration` | `e001090e88532bda2d4264bb806bc914fe7c6822` |
-| k26 | [verl](https://github.com/AQ-MedAI/verl) | `aq/k26-integration` | `be9a6dc3a01cadea0035fcb3e105eb665209d05e` |
+| v41 | [verl](https://github.com/verl-project/verl) | 上游 + v4.patch + v41.patch | `809f2d8f59910dfd3a96745b68119829650250a0` |
+| v4 | [verl](https://github.com/verl-project/verl) | 上游 + v4.patch + v41.patch | `809f2d8f59910dfd3a96745b68119829650250a0` |
+| k26 | [verl](https://github.com/verl-project/verl) | 上游 + k26.patch | `bee9f6f4bb1de784781e296f165b4c22d6c26cc1` |
 
 复现实验应固定 commit，而非跟随分支最新版本。机器可读版本见 [registry.json](../dependencies/registry.json)。
 
 ## 子模块与版本更新
 
-verl 在 fork 中维护。MindSpeed、MindSpeed-LLM 和 mbridge 使用上游固定提交加补丁，分别见 [MindSpeed](../patches/mindspeed/README.md)、[MindSpeed-LLM](../patches/mindspeed-llm/README.md) 和 [mbridge](../patches/mbridge/README.md)。框架格式遵循上游配置，补丁文件禁止自动格式化。
+四个依赖均使用上游固定提交加补丁，分别见 [verl](../patches/verl/README.md)、 [MindSpeed](../patches/mindspeed/README.md)、[MindSpeed-LLM](../patches/mindspeed-llm/README.md) 和 [mbridge](../patches/mbridge/README.md)。框架格式遵循上游配置，补丁文件禁止自动格式化。
 
 `third_party/` 中的四个 Git 子模块默认记录 V4.1 基线。`.gitmodules` 保存公开仓库地址，Git 子模块引用保存实际提交；`registry.json` 记录各模型的兼容组合。不要使用 `git submodule update --remote` 复现实验，它会跟随远端分支而绕过记录的版本。
 
-MindSpeed-LLM 两种配置共用上游基线：V4 应用公共补丁，V4.1 额外应用包含 `engram_hash.py` 和 Transformers 约束的增量补丁。拉齐四个框架后仍须准备下文的运行时和原生算子。
+MindSpeed-LLM 两种配置共用完整源码，均应用公共补丁和包含 `engram_hash.py`、Transformers 约束的增量补丁。拉齐四个框架后仍须准备下文的运行时和原生算子。
 
-维护者更新 verl fork 依赖时，先将框架改动提交并推送到对应 fork，再在子模块中检出该提交、同步 registry 和本页的固定版本，最后在 recipe 仓库提交 `git add third_party/<仓库名>` 记录的引用。`.gitmodules` 与四个子模块引用必须随 recipe 一同提交，其他人初始化源码时才会得到正确版本。
+维护者更新依赖时，需同步上游基线、补丁校验值、完整源码清单、registry 与本页版本；在 recipe 仓库提交 `git add third_party/<仓库名>` 记录的上游引用，不在子模块中提交补丁。`.gitmodules` 与四个子模块引用必须随 recipe 一同提交，其他人初始化源码时才会得到正确版本。
 
 V4 使用本页的 V4 提交组合，并通过各脚本支持的路径配置指向对应 checkout。K2.6 仍有未固定组件，不使用默认 V4.1 组合替代。现有平级开发目录可继续保留；子模块是面向使用者的源码获取入口。
 
@@ -32,7 +32,7 @@ mbridge 的子模块引用记录上游基线，`setup_sources.sh` 自动校验�
 
 ## V4 与 V4.1
 
-mbridge 共用版本；V4.1 的 MindSpeed-LLM 在 V4 基线上增加随附 Engram hash。MindSpeed 按配置选择补丁，verl 按配置固定提交：V4.1 使用新的 Megatron rank-owned optimizer 接口和 swap checkpoint 格式，需要与匹配的 Megatron-LM 同时部署；不能仅替换其中一个包。
+V4/V4.1 共用四个依赖的最终源码。verl 先应用 `v4.patch` 再叠加 `v41.patch`；MindSpeed 和 MindSpeed-LLM 均应用公共补丁及 V4.1 增量。模型架构和训练参数决定执行路径。共享 optimizer/checkpoint 接口仍需与匹配的 Megatron-LM 同时部署。
 
 V4.1 rollout 源码：
 
@@ -43,7 +43,7 @@ V4.1 权重同步 runtime 已随本仓库 `workspace/rollout/dsv41/runtime` 提�
 
 ## K2.6
 
-RL 与 MOPD 共用 verl 的 aq/k26-integration，蒸馏默认关闭。当前配置使用 model_engine=megatron、vanilla_mbridge=False，实际选择 Megatron-Bridge，不是 ISEEKYAN/mbridge；MindSpeed-LLM 也不是当前配置选择的模型入口。
+RL 与 MOPD 共用 verl 的 `k26.patch`，蒸馏默认关闭。当前配置使用 model_engine=megatron、vanilla_mbridge=False，实际选择 Megatron-Bridge，不是 ISEEKYAN/mbridge；MindSpeed-LLM 也不是当前配置选择的模型入口。
 
 K2.6 的 MindSpeed、Megatron-LM、Megatron-Bridge 与 rollout 配套版本尚未完整固定，不能直接套用 V4/V4.1 的组合。需要确认 Kimi 模型支持、CP、HF 导出接口以及 checkpoint 保存恢复能力。
 
@@ -55,4 +55,6 @@ K2.6 的 MindSpeed、Megatron-LM、Megatron-Bridge 与 rollout 配套版本尚�
 
 MindSpeed-LLM 的子模块同样记录上游基线；`dependencies/mindspeed-llm-sources.json` 分别校验 V4 和 V4.1 的完整源码。使用 `bash tools/setup_sources.sh v4` 或 `bash tools/setup_sources.sh v41` 切换。切换前验证所有依赖；仅撤销与清单完全匹配的已知补丁，额外修改或暂存内容会阻止操作。子模块内部的补丁修改无需单独提交。
 
-MindSpeed 共用固定上游基线，V4 应用 `patches/mindspeed/common.patch`，V4.1 额外应用 `v41.patch`。完整清单在 `dependencies/mindspeed-sources.json`；初始化与切换同样由 `setup_sources.sh` 校验和管理。V4.1 增量包含 optimizer/checkpoint 接口差异和 NumPy 1.26.4 约束，不能省略后直接运行 V4.1。
+MindSpeed 共用固定上游基线，V4 与 V4.1 均应用 `patches/mindspeed/common.patch` 和 `v41.patch`。完整清单在 `dependencies/mindspeed-sources.json`；初始化与切换同样由 `setup_sources.sh` 校验和管理。V4.1 增量包含 optimizer/checkpoint 接口差异和 NumPy 1.26.4 约束，不能省略后直接运行 V4.1。
+
+使用 `bash tools/setup_sources.sh k26` 仅准备 K2.6 的 verl，不切换其他三个依赖，也不代表完整 K2.6 环境已就绪。V4/V4.1 共用层叠补丁，与 K2.6 的 verl 补丁互斥；脚本校验并撤销当前已知补丁后切换到目标基线。

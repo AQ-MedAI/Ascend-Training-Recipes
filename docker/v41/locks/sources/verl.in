@@ -1,4 +1,4 @@
-# Dependency declarations from https://github.com/AQ-MedAI/verl @ c73f779e4d6ebbf6172c3b020e47b3fd2f346d52
+# Dependency declarations from verl-project/verl @ 809f2d8f59910dfd3a96745b68119829650250a0 + v4.patch + v41.patch
 accelerate
 codetiming
 datasets

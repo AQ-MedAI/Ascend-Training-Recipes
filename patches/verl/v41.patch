@@ -1,0 +1,879 @@
+diff --git a/verl/experimental/agent_loop/agent_loop.py b/verl/experimental/agent_loop/agent_loop.py
+index d51503615c4b4e2b022d98e21cc0eb88b9c9500a..fe1b75fc3128d014cbd7fcec60e01be1bc71a68c 100644
+--- a/verl/experimental/agent_loop/agent_loop.py
++++ b/verl/experimental/agent_loop/agent_loop.py
+@@ -1143,6 +1143,13 @@ class AgentLoopManager:
+         # for recipe to change
+         if not hasattr(self, "rollout_replica_class"):
+             self.rollout_replica_class = get_rollout_replica_class(self.rollout_config.name)
++            if self.rollout_config.name == 'vllm':
++                # The manager receives raw DictConfig, unlike engine workers.
++                # HFModelConfig derives architectures from the checkpoint config.
++                resolved_model = omega_conf_to_dataclass(self.model_config)
++                if 'DeepseekV41ForCausalLM' in (resolved_model.architectures or []):
++                    from workspace.rollout.dsv41.runtime.ray_server import V41Replica
++                    self.rollout_replica_class = V41Replica
+         if not hasattr(self, "agent_loop_workers_class"):
+             if OmegaConf.select(self.config, "actor_rollout_ref.model.model_type", default=None) == "diffusion_model":
+                 from verl.experimental.agent_loop.diffusion_agent_loop import DiffusionAgentLoopWorker
+diff --git a/verl/models/mcore/model_forward.py b/verl/models/mcore/model_forward.py
+index d784432f92b1c3cf7e6a6e85cded4f62f1a6988c..923ea7183940e16608f45e335277f5bddfd84624 100644
+--- a/verl/models/mcore/model_forward.py
++++ b/verl/models/mcore/model_forward.py
+@@ -222,6 +222,7 @@ def gptmodel_forward_model_engine(
+     data_format: str = "thd",
+     mtp_enable_train: bool = False,
+     local_cp_size: Optional[int] = None,
++    padding_multiple: int = 2048,
+ ):
+     """Default forward pass for GPT models with optional sequence packing."""
+ 
+@@ -329,7 +330,8 @@ def gptmodel_forward_model_engine(
+         assert local_cp_size is None, "dynamic_CP is not supported for bshd format"
+ 
+         input_ids_bshd, attention_mask_bshd, position_ids_bshd = preprocess_bshd_engine(
+-            input_ids, pre_process=pre_process or (post_process and mtp_enable_train), use_fp8_padding=use_fp8_padding
++            input_ids, pre_process=pre_process or (post_process and mtp_enable_train), use_fp8_padding=use_fp8_padding,
++            padding_multiple=padding_multiple
+         )
+ 
+         if mtp_enable_train and post_process:
+@@ -342,9 +344,10 @@ def gptmodel_forward_model_engine(
+                 v = logits_processor_args[k]
+                 v = _convert_to_nested_tensor(v, input_ids_lengths)
+                 logits_processor_args[k] = v
+-                args[k] = preprocess_bshd_engine(v, pre_process=True, need_roll=True, use_fp8_padding=use_fp8_padding)[
+-                    0
+-                ]
++                args[k] = preprocess_bshd_engine(
++                    v, pre_process=True, need_roll=True, use_fp8_padding=use_fp8_padding,
++                    padding_multiple=padding_multiple,
++                )[0]
+             model_kwargs["labels"] = args["label"].contiguous()
+             model_kwargs["loss_mask"] = args["loss_mask"].contiguous()
+ 
+@@ -368,7 +371,8 @@ def gptmodel_forward_model_engine(
+         if post_process and logits_processor is not None:
+             args = {
+                 k: preprocess_bshd_engine(
+-                    v, pre_process=True, need_roll=(k == "label"), use_fp8_padding=use_fp8_padding
++                    v, pre_process=True, need_roll=(k == "label"), use_fp8_padding=use_fp8_padding,
++                    padding_multiple=padding_multiple
+                 )[0]
+                 for k, v in logits_processor_args.items()
+             }
+diff --git a/verl/models/mcore/patch.py b/verl/models/mcore/patch.py
+index b8c3d96f4a9c24912c195bfa5bf7501dfcd0340c..8c574a4bf0bc234094ef5bb01aad568f9e2f4d5a 100644
+--- a/verl/models/mcore/patch.py
++++ b/verl/models/mcore/patch.py
+@@ -536,15 +536,18 @@ def apply_patch_megatron_recomputation_backward():
+             else inp
+             for inp in detached_inputs
+         )
+-        cur_stream = torch.cuda.current_stream()
+-        # Release original input and grad tensors
+-        for t in detached_inputs:
+-            if isinstance(t, torch.Tensor) and t.requires_grad:
+-                t.record_stream(cur_stream)
+-                t.untyped_storage().resize_(0)
+-                if t.grad is not None:
+-                    t.grad.record_stream(cur_stream)
+-                    t.grad.untyped_storage().resize_(0)
++        # Cross-layer shared KV/K still belong to other checkpoint nodes.
++        # detach() shares storage: explicit resize would invalidate those users.
++        if not getattr(ctx, 'preserve_checkpoint_input_storage', False):
++            cur_stream = torch.cuda.current_stream()
++            # Release original input and grad tensors
++            for t in detached_inputs:
++                if isinstance(t, torch.Tensor) and t.requires_grad:
++                    t.record_stream(cur_stream)
++                    t.untyped_storage().resize_(0)
++                    if t.grad is not None:
++                        t.grad.record_stream(cur_stream)
++                        t.grad.untyped_storage().resize_(0)
+         # ctx.saved_tensors = None
+         return (None, None) + grads
+ 
+diff --git a/verl/models/mcore/registry.py b/verl/models/mcore/registry.py
+index fe5910ab802774ed928a06b9dd6b598ae85699fa..febc270409c952882b06efad5d4466657f95e36f 100644
+--- a/verl/models/mcore/registry.py
++++ b/verl/models/mcore/registry.py
+@@ -54,6 +54,8 @@ def get_mcore_engine_forward_fn(hf_config) -> Callable:
+     Get the forward function for given model architecture.
+     """
+     assert len(hf_config.architectures) == 1, "Only one architecture is supported for now"
++    if hf_config.architectures[0] == "DeepseekV41ForCausalLM":
++        return v41_text_engine_forward
+     return gptmodel_forward_model_engine
+ 
+ 
+@@ -293,3 +295,18 @@ def get_mcore_weight_converter(hf_config: PretrainedConfig, dtype: torch.dtype)
+     model = get_supported_model(hf_config.architectures[0])
+     tfconfig = hf_to_mcore_config(hf_config, dtype)
+     return MODEL_WEIGHT_CONVERTER_REGISTRY[model](hf_config, tfconfig)
++
++
++def v41_text_engine_forward(model, input_ids, multi_modal_inputs, **kwargs):
++    """Keep explicit CP positions for the text-only native V4.1 provider."""
++    from megatron.core import parallel_state as mpu
++
++    if multi_modal_inputs:
++        raise ValueError("Native V4.1 currently supports text input only")
++    if kwargs.get("data_format") != "bshd":
++        raise ValueError("Native V4.1 requires bshd and use_remove_padding=False")
++    kwargs["vision_model"] = False
++    kwargs["padding_multiple"] = (
++        2 * mpu.get_tensor_model_parallel_world_size() * mpu.get_context_parallel_world_size()
++    )
++    return gptmodel_forward_model_engine(model, input_ids, multi_modal_inputs, **kwargs)
+diff --git a/verl/models/mcore/util.py b/verl/models/mcore/util.py
+index 36040c3f35a0356b07dd7ae3a03eeca728e8adfd..b002496f6eeafe265c9429e0a3b2df84e1999531 100644
+--- a/verl/models/mcore/util.py
++++ b/verl/models/mcore/util.py
+@@ -555,7 +555,8 @@ def _build_npu_attn_mask(original_attention_mask: torch.Tensor) -> torch.Tensor:
+ 
+ 
+ def preprocess_bshd_engine(
+-    input_ids: torch.Tensor, pre_process: bool = True, need_roll: bool = False, use_fp8_padding: bool = False
++    input_ids: torch.Tensor, pre_process: bool = True, need_roll: bool = False, use_fp8_padding: bool = False,
++    padding_multiple: int = 2048,
+ ):
+     """
+     Preprocess bshd sequences
+@@ -571,7 +572,9 @@ def preprocess_bshd_engine(
+     dense_shape = tuple(input_ids.shape[2:])
+     seqlens_in_batch = input_ids.offsets().diff()
+     max_seqlen = seqlens_in_batch.max().item()
+-    align_value = 2048
++    if padding_multiple < 1:
++        raise ValueError("padding_multiple must be positive")
++    align_value = padding_multiple
+     if max_seqlen % align_value != 0:
+         old_seqlen = max_seqlen
+         max_seqlen = ((max_seqlen + align_value - 1) // align_value) * align_value
+diff --git a/verl/trainer/main_ppo.py b/verl/trainer/main_ppo.py
+index 8f6cd416d162d47da85c39e47d7b774ccdcbbe41..99f80ad3f2c9a11ef68c8a9c957ef9788f3df1c6 100644
+--- a/verl/trainer/main_ppo.py
++++ b/verl/trainer/main_ppo.py
+@@ -258,11 +258,10 @@ class TaskRunner:
+             use_critic=need_critic(config),
+         )
+ 
+-        # Download the checkpoint from HDFS to the local machine.
+-        # `use_shm` determines whether to use shared memory, which could lead to faster model loading if turned on
+-        local_path = copy_to_local(
+-            config.actor_rollout_ref.model.path, use_shm=config.actor_rollout_ref.model.get("use_shm", False)
+-        )
++        # Match HFModelConfig: cropped checkpoints may keep tokenizer assets elsewhere.
++        model_config = config.actor_rollout_ref.model
++        tokenizer_path = model_config.get("tokenizer_path") or model_config.path
++        local_path = copy_to_local(tokenizer_path, use_shm=model_config.get("use_shm", False))
+ 
+         # Instantiate the tokenizer and processor.
+         from verl.utils import hf_processor, hf_tokenizer
+@@ -271,6 +270,12 @@ class TaskRunner:
+         tokenizer = hf_tokenizer(local_path, trust_remote_code=trust_remote_code)
+         # Used for multimodal LLM, could be None
+         processor = hf_processor(local_path, trust_remote_code=trust_remote_code, use_fast=True)
++        # Use the same explicit template as HFModelConfig / AgentLoop workers.
++        custom_chat_template = model_config.get("custom_chat_template")
++        if custom_chat_template is not None:
++            tokenizer.chat_template = custom_chat_template
++            if processor is not None:
++                processor.chat_template = custom_chat_template
+ 
+         resource_pool_manager = self.init_resource_pool_mgr(config)
+ 
+diff --git a/verl/utils/checkpoint/megatron_checkpoint_manager.py b/verl/utils/checkpoint/megatron_checkpoint_manager.py
+index 10c670ac303700e982fb25f17a506775eaedcc71..daf0bb7b8cded0cd69640bbfc71a6ee9dcd5d8b8 100644
+--- a/verl/utils/checkpoint/megatron_checkpoint_manager.py
++++ b/verl/utils/checkpoint/megatron_checkpoint_manager.py
+@@ -19,6 +19,7 @@ import os
+ import random
+ from collections.abc import Callable
+ from dataclasses import asdict
++from enum import Enum
+ 
+ import megatron.core
+ import numpy as np
+@@ -43,6 +44,14 @@ from verl.utils.megatron_utils import (
+ 
+ from .checkpoint_manager import BaseCheckpointManager
+ 
++
++def _config_json_default(value):
++    """Serialize config enum values, including values in nested containers."""
++    if isinstance(value, Enum):
++        return str(value)
++    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
++
++
+ # Setup logging
+ logger = logging.getLogger(__file__)
+ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "INFO"))
+@@ -108,7 +117,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
+         ```
+     """
+ 
+-    _SWAP_OPTIMIZER_SHARDING_TYPE = "dp_zero_gather_scatter"
++    _SWAP_OPTIMIZER_SHARDING_TYPE = "fully_sharded_model_space"
+ 
+     def _uses_swap_optimizer(self) -> bool:
+         """Return whether any optimizer layer uses MindSpeed swap.
+@@ -336,15 +345,15 @@ class MegatronCheckpointManager(BaseCheckpointManager):
+                 if mcore_ge_014:
+                     sharded_state_dict_kwargs["metadata"] = base_metadata
+                 elif self._uses_swap_optimizer():
+-                    # MCore 0.12's fully-sharded-model-space path reads the
+-                    # device optimizer tensors directly. MindSpeed swap keeps
+-                    # their authoritative copies in its CPU state map and
+-                    # releases the device storage, so use MindSpeed's existing
+-                    # swap-aware DP gather/scatter checkpoint implementation.
+-                    sharded_state_dict_kwargs["sharding_type"] = self._SWAP_OPTIMIZER_SHARDING_TYPE
++                    # New saves use tensor shards backed by swap CPU states.
++                    # Restore legacy checkpoints using their recorded format.
++                    sharded_state_dict_kwargs["sharding_type"] = (
++                        base_metadata.get("distrib_optim_sharding_type", self._SWAP_OPTIMIZER_SHARDING_TYPE)
++                        if is_loading else self._SWAP_OPTIMIZER_SHARDING_TYPE
++                    )
+                     log_with_rank(
+                         "MindSpeed swap optimizer detected; using "
+-                        f"{self._SWAP_OPTIMIZER_SHARDING_TYPE} checkpoint state",
++                        f"{sharded_state_dict_kwargs['sharding_type']} checkpoint state",
+                         rank=self.rank,
+                         logger=logger,
+                         log_only_rank_0=True,
+@@ -600,6 +609,24 @@ class MegatronCheckpointManager(BaseCheckpointManager):
+                 )
+ 
+     def save_checkpoint(self, local_path: str, hdfs_path: str = None, global_step: int = 0, max_ckpt_to_keep=None):
++        if self._uses_swap_optimizer():
++            # Live worker evidence, rather than a driver-side import assumption.
++            import hashlib
++            import inspect
++            from pathlib import Path
++            from mindspeed.core.optimizer.swap_optimizer.swap_optimizer import SwapDistributedOptimizer
++            from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
++            for cls in (SwapDistributedOptimizer, DistributedOptimizer):
++                source = Path(inspect.getfile(cls)).resolve()
++                log_with_rank(
++                    f"Checkpoint runtime {cls.__name__}: source={source} "
++                    f"sha256={hashlib.sha256(source.read_bytes()).hexdigest()} "
++                    f"swap_format={self._SWAP_OPTIMIZER_SHARDING_TYPE}",
++                    rank=self.rank, logger=logger,
++                )
++            if self.checkpoint_config.async_save:
++                raise ValueError("Swap CPU-view checkpoints require synchronous save to keep states stable")
++
+         # record the previous global step
+         self.previous_global_step = global_step
+ 
+@@ -760,7 +787,7 @@ class MegatronCheckpointManager(BaseCheckpointManager):
+                     transformer_config_dict.pop(key)
+                 transformer_config_path = get_transformer_config_checkpoint_path(local_path)
+                 with open(transformer_config_path, "w") as f:
+-                    json.dump(transformer_config_dict, f, indent=2)
++                    json.dump(transformer_config_dict, f, indent=2, default=_config_json_default)
+ 
+         if self.should_save_hf_model and not self.use_hf_checkpoint:
+             # wait for everyone to dump to local
+diff --git a/verl/utils/config.py b/verl/utils/config.py
+index ccac5f1764f2b001068af5a4ed46da3138ae8e85..6da6945fef8fae28e1c08d6962bdc5711c8f7171 100644
+--- a/verl/utils/config.py
++++ b/verl/utils/config.py
+@@ -87,19 +87,20 @@ def validate_config(
+     n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
+ 
+     if not config.actor_rollout_ref.actor.use_dynamic_bsz:
+-        if config.actor_rollout_ref.actor.strategy == "megatron":
++        strategy = config.actor_rollout_ref.actor.strategy
++        if strategy in ("megatron", "mindspeed"):
++            parallel_config = config.actor_rollout_ref.actor[strategy]
+             model_parallel_size = (
+-                config.actor_rollout_ref.actor.megatron.tensor_model_parallel_size
+-                * config.actor_rollout_ref.actor.megatron.pipeline_model_parallel_size
++                parallel_config.tensor_model_parallel_size * parallel_config.pipeline_model_parallel_size
+             )
+             assert (
+-                n_gpus % (model_parallel_size * config.actor_rollout_ref.actor.megatron.context_parallel_size) == 0
++                n_gpus % (model_parallel_size * parallel_config.context_parallel_size) == 0
+             ), (
+                 f"n_gpus ({n_gpus}) must be divisible by model_parallel_size ({model_parallel_size}) times "
+-                f"context_parallel_size ({config.actor_rollout_ref.actor.megatron.context_parallel_size})"
++                f"context_parallel_size ({parallel_config.context_parallel_size})"
+             )
+             megatron_dp = n_gpus // (
+-                model_parallel_size * config.actor_rollout_ref.actor.megatron.context_parallel_size
++                model_parallel_size * parallel_config.context_parallel_size
+             )
+             minimal_bsz = megatron_dp * config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu
+         else:
+diff --git a/verl/utils/deepseek_v41_config.py b/verl/utils/deepseek_v41_config.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..85b72d0f4289e472f1a334bbfa69e659f2169cd5
+--- /dev/null
++++ b/verl/utils/deepseek_v41_config.py
+@@ -0,0 +1,30 @@
++"""Register the existing pinned rollout config through HFModelConfig.external_lib.
++
++Load only its standalone config module, without importing vLLM/Ascend plugins.
++The config equations/aliases remain owned by the pinned rollout source.
++"""
++import hashlib
++import importlib.util
++import os
++from pathlib import Path
++
++from transformers import AutoConfig
++from transformers.models.auto.configuration_auto import CONFIG_MAPPING
++
++DEPENDENCY_ROOT = Path(os.environ.get('DEPENDENCY_ROOT', Path(__file__).resolve().parents[3]))
++SOURCE = Path(os.environ.get('V41_CONFIG_SOURCE', str(DEPENDENCY_ROOT /
++          'workspace/rollout/dsv41/vllm-ascend/vllm_ascend/deepseek_v41_config.py')))
++if not SOURCE.is_file():
++    raise FileNotFoundError(f'Pinned V4.1 configuration source is missing: {SOURCE}')
++SOURCE_SHA256 = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
++_spec = importlib.util.spec_from_file_location('_v41_config_source', SOURCE)
++_source = importlib.util.module_from_spec(_spec)
++_spec.loader.exec_module(_source)
++
++# Stable importable class names also allow configs to be pickled by Ray.
++for _name in ('DeepseekV41Config', 'DeepseekV41TextConfig', 'DeepseekV41VisionConfig'):
++    _cls = getattr(_source, _name)
++    _cls.__module__ = __name__
++    globals()[_name] = _cls
++    if _cls.model_type not in CONFIG_MAPPING:
++        AutoConfig.register(_cls.model_type, _cls)
+diff --git a/verl/utils/megatron/optimizer.py b/verl/utils/megatron/optimizer.py
+index 625cd24b921412899bc89515579acfdc1b7719de..9642adfd656b140599c2162ea0ef98ec4f7f165c 100644
+--- a/verl/utils/megatron/optimizer.py
++++ b/verl/utils/megatron/optimizer.py
+@@ -66,11 +66,36 @@ def get_megatron_optimizer(
+     model,
+     config: OptimizerConfig,
+ ):
+-    # Base optimizer.
+-    return get_megatron_optimizer_native(
+-        config=config,
+-        model_chunks=model,
++    # SwapDistributedOptimizer owns main parameters and Adam state itself.
++    # HybridDeviceOptimizer adds a second parameter/state owner even with zero
++    # CPU fraction; its outer groups are not the AdamW groups used by swap.
++    from copy import copy
++    from megatron.core import optimizer as native
++
++    distributed_cls = native.DistributedOptimizer
++    swap_enabled = any(
++        cls.__name__ == "SwapDistributedOptimizer"
++        and cls.__module__.startswith("mindspeed.")
++        for cls in distributed_cls.__mro__
+     )
++    if swap_enabled and config.use_distributed_optimizer:
++        if config.optimizer != "adam" or config.use_precision_aware_optimizer:
++            raise ValueError("MindSpeed AdamW swap requires adam and precision-aware=False")
++        if config.optimizer_cpu_offload and config.optimizer_offload_fraction != 0:
++            raise ValueError("MindSpeed swap cannot be combined with nonzero Hybrid CPU offload")
++        if (native.Adam.__module__, native.Adam.__name__) != (
++            "mindspeed.core.optimizer.adamw", "AdamW"
++        ):
++            raise ValueError("MindSpeed swap requires its patched AdamW; got "
++                             f"{native.Adam.__module__}.{native.Adam.__name__}")
++        if config.optimizer_cpu_offload:
++            config = copy(config)
++            config.optimizer_cpu_offload = False
++            print_rank_0(
++                "MindSpeed swap: bypass zero-fraction HybridDeviceOptimizer; "
++                "effective optimizer_cpu_offload=False, swap remains enabled."
++            )
++    return get_megatron_optimizer_native(config=config, model_chunks=model)
+ 
+ 
+ def get_megatron_optimizer_param_scheduler(
+diff --git a/verl/utils/megatron_utils.py b/verl/utils/megatron_utils.py
+index 72cd4e96471a7003933720bdd33d5e9304ce8e8f..3ad07e9ed9e4f5174de13036afe9001c86eecff9 100644
+--- a/verl/utils/megatron_utils.py
++++ b/verl/utils/megatron_utils.py
+@@ -510,7 +510,7 @@ def offload_megatron_model_to_cpu(models):
+     """
+     for model_chunk in models:
+         if isinstance(model_chunk, DDP):
+-            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers]
++            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers, getattr(model_chunk, "owner_buffers", [])]
+             for buffers in model_chunk_all_buffers:
+                 for buffer in buffers:
+                     # offload parameters
+@@ -551,7 +551,7 @@ def load_megatron_model_to_gpu(models, load_grad=True, load_frozen_params=True):
+     """
+     for model_chunk in models:
+         if isinstance(model_chunk, DDP):
+-            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers]
++            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers, getattr(model_chunk, "owner_buffers", [])]
+             for buffers in model_chunk_all_buffers:
+                 for buffer in buffers:
+                     # sometimes, we don't want to load grad for pure inference
+@@ -1567,7 +1567,7 @@ def copy_megatron_model_to_cpu(models):
+     for model_idx, model_chunk in enumerate(models):
+         if isinstance(model_chunk, DDP):
+             # Handle DDP-wrapped models
+-            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers]
++            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers, getattr(model_chunk, "owner_buffers", [])]
+             buffer_states = []
+ 
+             for buffers in model_chunk_all_buffers:
+@@ -1613,7 +1613,7 @@ def restore_megatron_model_from_cpu(models, cpu_state):
+ 
+         if chunk_state["is_ddp"] and isinstance(model_chunk, DDP):
+             # Restore DDP buffers
+-            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers]
++            model_chunk_all_buffers = [model_chunk.buffers, model_chunk.expert_parallel_buffers, getattr(model_chunk, "owner_buffers", [])]
+             buffer_states = chunk_state["buffer_states"]
+ 
+             for buffers, buffer_list in zip(model_chunk_all_buffers, buffer_states, strict=False):
+diff --git a/verl/utils/rollout_lifecycle.py b/verl/utils/rollout_lifecycle.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..098eabc5a312f36ad7093219288fa99f72b6ccca
+--- /dev/null
++++ b/verl/utils/rollout_lifecycle.py
+@@ -0,0 +1,19 @@
++"""Shared colocated rollout operations for synchronous and asynchronous engines.
++
++Return the engine result unchanged: AsyncLLM callers await it, LLM callers do not.
++Worker sleep deliberately leaves the EngineCore scheduler running, as in V4.
++"""
++
++
++def sleep_workers(engine, level):
++    if level not in (1, 2):
++        raise ValueError('Unsupported colocated sleep level')
++    return engine.collective_rpc('sleep', kwargs={'level': level})
++
++
++def wake_weights(engine):
++    return engine.wake_up(tags=['weights'])
++
++
++def wake_kv_cache(engine):
++    return engine.wake_up(tags=['kv_cache'])
+diff --git a/verl/workers/config/model.py b/verl/workers/config/model.py
+index 0d85cc765fc26d282dd47d8afcb1b22143bc7472..31c2d66e3e12ed4e0de3b862f2c1881f06428fc9 100644
+--- a/verl/workers/config/model.py
++++ b/verl/workers/config/model.py
+@@ -187,10 +187,10 @@ class HFModelConfig(BaseConfig):
+             self.processor.chat_template = self.tokenizer.chat_template
+ 
+         if self.custom_chat_template is not None:
++            if self.tokenizer is not None:
++                self.tokenizer.chat_template = self.custom_chat_template
+             if self.processor is not None:
+                 self.processor.chat_template = self.custom_chat_template
+-            else:
+-                self.tokenizer.chat_template = self.custom_chat_template
+ 
+         self.local_hf_config_path = copy_to_local(self.hf_config_path, use_shm=self.use_shm)
+         self.generation_config = get_generation_config(
+diff --git a/verl/workers/engine/megatron/transformer_impl.py b/verl/workers/engine/megatron/transformer_impl.py
+index a77a38a39634469fef553d461e54e5a1e66d0374..9a688d86f8394c1e3a6aa0710e5deb3782fa7fcf 100644
+--- a/verl/workers/engine/megatron/transformer_impl.py
++++ b/verl/workers/engine/megatron/transformer_impl.py
+@@ -630,7 +630,7 @@ class MegatronEngine(BaseEngine):
+ 
+         micro_batches, indices = prepare_micro_batches(
+             data=data,
+-            dp_group=self.get_data_parallel_group(),
++            dp_group=getattr(self, "micro_batch_group", self.get_data_parallel_group()),
+             num_batches_divided_by=num_batches_divided_by,
+             same_micro_num_in_dp=True,
+             min_num_micro_batch=None,
+diff --git a/verl/workers/engine/mindspeed/transformer_impl.py b/verl/workers/engine/mindspeed/transformer_impl.py
+index 9faaf793fc9f9eff786a8fb8efb9ec6b62b6e40b..33c53fb6586691dc9bddba8a4dd9d401eec5b926 100644
+--- a/verl/workers/engine/mindspeed/transformer_impl.py
++++ b/verl/workers/engine/mindspeed/transformer_impl.py
+@@ -79,6 +79,9 @@ class MindSpeedLLMEngineWithLMHead(MegatronEngineWithLMHead):
+         super().__init__(model_config, engine_config, optimizer_config, checkpoint_config)
+ 
+     def _init_device_mesh(self):
++        if 'DeepseekV41ForCausalLM' in self.model_config.architectures:
++            from .utils import sync_v41_recompute_config
++            sync_v41_recompute_config(self.engine_config)
+         apply_patch(self.model_config, self.engine_config, self.optimizer_config)
+         super()._init_device_mesh()
+ 
+@@ -93,14 +96,45 @@ class MindSpeedLLMEngineWithLMHead(MegatronEngineWithLMHead):
+         import torch.distributed
+         from megatron.core.enums import ModelType
+         from megatron.training.training import get_model
+-        from mindspeed_llm.pretrain_deepseek4 import model_provider
+-
+-        gpt_model_provider = model_provider
++        if 'DeepseekV41ForCausalLM' in self.model_config.architectures:
++            from functools import partial
++            from mindspeed_llm.tasks.models.transformer.deepseek41.native_model import model_provider
++
++            if self.engine_config.use_remove_padding or self.engine_config.dynamic_context_parallel:
++                raise ValueError('V4.1 native integration requires use_remove_padding=False and static CP')
++            if self.enable_routing_replay:
++                raise ValueError('V4.1 routing replay has not been integrated')
++            options = self.engine_config.llm_kwargs
++            from mindspeed_llm.tasks.models.transformer.deepseek41.native_config import resolve_indexer_loss_coefficient
++            self.tf_config.v41_indexer_coefficient = resolve_indexer_loss_coefficient(
++                options, self.tf_config.v41_indexer_coefficient)
++            if torch.distributed.get_rank() == 0:
++                print(f"V4.1 effective indexer_loss_coeff={self.tf_config.v41_indexer_coefficient}", flush=True)
++            self.bridge.engram_crop = options.get('v41_engram_crop')
++            self.bridge.engram_source = options.get('v41_engram_source') or self.model_config.local_path
++            gpt_model_provider = partial(
++                model_provider, config=self.tf_config, hf_config=self.model_config.hf_config,
++                model_path=self.model_config.local_path,
++                engram_crop=options.get('v41_engram_crop'),
++                engram_table_trainable=options.get('v41_engram_table_trainable', True),
++                engram_source=options.get('v41_engram_source'),
++                hash_source=options.get('v41_engram_hash_source'),
++                max_sequence_length=options.get('seq_length', 2048),
++            )
++        else:
++            from mindspeed_llm.pretrain_deepseek4 import model_provider
++            gpt_model_provider = model_provider
+         # For forward_only, we don't need optimizer, lr_scheduler, checkpoint_mananager
+         if self.engine_config.forward_only:
+             module = get_model(gpt_model_provider, ModelType.encoder_or_decoder, wrap_with_ddp=False)
+         else:
+             module = get_model(gpt_model_provider, ModelType.encoder_or_decoder, wrap_with_ddp=True)
++        # The table lookup spans WORLD, including frozen tables. Reuse the
++        # existing dynamic splitter, synchronizing its count over all owners.
++        self.micro_batch_group = (torch.distributed.group.WORLD if any(
++            getattr(p, "engram_row_sharded", False)
++            for chunk in module for p in chunk.parameters()
++        ) else self.get_data_parallel_group())
+         if self.vanilla_bridge:
+             self.bridge.load_weights(module, self.model_config.local_path, memory_efficient=True)
+         else:
+diff --git a/verl/workers/engine/mindspeed/utils.py b/verl/workers/engine/mindspeed/utils.py
+index ecb9de4c8584746c02d19f862a01c72f75b3cdf5..0aa64279511c68b6b802e3bf1d4fa861cdf56a30 100644
+--- a/verl/workers/engine/mindspeed/utils.py
++++ b/verl/workers/engine/mindspeed/utils.py
+@@ -20,6 +20,31 @@ import torch
+ from verl.workers.config import HFModelConfig, McoreOptimizerConfig, MindSpeedEngineConfig
+ 
+ 
++def sync_v41_recompute_config(engine_config):
++    """Share MindSpeed recomputation settings with mbridge before either is built.
++
++    Hydra's null override defaults are unspecified; llm_kwargs is authoritative
++    when present. Conflicting non-null overrides are rejected before mutation.
++    """
++    llm = engine_config.llm_kwargs
++    overrides = engine_config.override_transformer_config
++    resolved = {}
++    for key in ("recompute_granularity", "recompute_method", "recompute_num_layers"):
++        if key in llm:
++            value = llm[key]
++            other = overrides.get(key)
++            if other is not None and other != value:
++                raise ValueError(
++                    f"V4.1 conflicting {key}: llm_kwargs={value!r}, "
++                    f"override_transformer_config={other!r}; configure llm_kwargs only."
++                )
++            resolved[key] = value
++        elif overrides.get(key) is not None:
++            resolved[key] = overrides[key]
++    llm.update(resolved)
++    overrides.update(resolved)
++
++
+ def get_base_mcore_config_from_model_config(model_config: HFModelConfig) -> dict:
+     """
+     Create a base TransformerConfig with common parameters across different model architectures.
+@@ -155,9 +180,41 @@ def add_mcore_arguments(all_config: dict) -> dict:
+ def apply_patch(model_config, engine_config, optimizer_config):
+     # model_config = get_base_mcore_config_from_model_config(model_config)
+     # optimizer_config = get_base_mcore_config_from_optim_config(optimizer_config)
++    is_v41 = 'DeepseekV41ForCausalLM' in model_config.architectures
+     engine_config = get_base_mcore_config_from_engine_config(engine_config)
+     #all_config = {**model_config, **optimizer_config, **engine_config}
+     all_config = {**engine_config}
++    if is_v41:
++        # Geometry comes from the actual V4.1 checkpoint, never a V4 launcher's
++        # num_layers/hidden_size/spec. Optimizer values follow the existing factory.
++        raw = model_config.hf_config.to_dict()
++        c = raw.get('text_config', raw)
++        # Match the V4 engine: optimizer overrides belong to OptimizerConfig,
++        # consumed by init_megatron_optim_config during _build_optimizer.
++        # Injecting them into CLI args wrongly activates the upstream hybrid
++        # offload validator (which requires precision-aware optimization).
++        # MindSpeed swap_optimizer remains selected through engine llm_kwargs.
++        all_config.update(
++            num_layers=c['num_hidden_layers'], hidden_size=c['hidden_size'],
++            num_attention_heads=c['num_attention_heads'], kv_channels=c['head_dim'],
++            num_experts=c['n_routed_experts'], moe_router_topk=c['num_experts_per_tok'],
++            ffn_hidden_size=c['moe_intermediate_size'], moe_ffn_hidden_size=c['moe_intermediate_size'],
++            moe_shared_expert_intermediate_size=c['moe_intermediate_size'],
++            padded_vocab_size=c['vocab_size'], make_vocab_size_divisible_by=1,
++            max_position_embeddings=c['max_position_embeddings'],
++            norm_epsilon=c['rms_norm_eps'], num_layer_list=None,
++            n_hash_layers=0, mtp_num_layers=0, spec=None, enable_mhc=False,
++            enable_dsa_indexer=False, position_embedding_type='none',
++            swiglu=True, swiglu_limit=c['swiglu_limit'],
++            moe_grouped_gemm=False, moe_shared_expert_overlap=False,
++            use_global_aux_loss=False, moe_router_load_balancing_type='none',
++            moe_router_enable_expert_bias=False, moe_router_dtype='fp32',
++            moe_alltoall_overlap_comm=False, moe_allgather_overlap_comm=False,
++            sequence_parallel=engine_config['tensor_model_parallel_size'] > 1,
++            add_bias_linear=False, disable_bias_linear=True, untie_embeddings_and_output_weights=True,
++            bf16=True, use_mcore_models=True,
++            tokenizer_type='PretrainedFromHF', tokenizer_name_or_path=model_config.tokenizer_path,
++        )
+     mcore_config = add_mcore_arguments(all_config)
+     from mindspeed_llm.tasks.megatron_adaptor_v2 import repatch
+ 
+diff --git a/verl/workers/engine_workers.py b/verl/workers/engine_workers.py
+index e212da795c580952a91cc57a7f0fa9cf7240306c..081cffe88b933bc82e2a2900e0323ce0b72eefb1 100644
+--- a/verl/workers/engine_workers.py
++++ b/verl/workers/engine_workers.py
+@@ -637,6 +637,9 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
+ 
+             # 3.2 initialize rollout engine
+             rollout_cls: type[BaseRollout] = get_rollout_class(rollout_config.name, rollout_config.mode)
++            if rollout_config.name == 'vllm' and 'DeepseekV41ForCausalLM' in model_config.architectures:
++                from workspace.rollout.dsv41.runtime.native_adapter import V41ServerAdapter
++                rollout_cls = V41ServerAdapter
+             self.rollout = rollout_cls(
+                 config=rollout_config, model_config=model_config, device_mesh=rollout_device_mesh
+             )
+diff --git a/verl/workers/rollout/vllm_rollout/bucketed_weight_transfer.py b/verl/workers/rollout/vllm_rollout/bucketed_weight_transfer.py
+index 81ac0ea18531c13dd1cab1adf11ac531ac882238..4f44b12206db65bbcf657cb6cf188df20ab563b6 100644
+--- a/verl/workers/rollout/vllm_rollout/bucketed_weight_transfer.py
++++ b/verl/workers/rollout/vllm_rollout/bucketed_weight_transfer.py
+@@ -18,6 +18,7 @@ Not recommended depending on vllm for this file.
+ """
+ 
+ import gc
++import json
+ import logging
+ import os
+ from multiprocessing import shared_memory
+@@ -117,6 +118,16 @@ class BucketedWeightSender:
+             bucket_meta: dict[str, TensorMetadata] = {}
+             # dtype = PrecisionType.to_dtype(self.config.dtype)
+             async for name, weight in ensure_async_iterator(weights):
++                # Consume every export item (including its collectives), but only pack
++                # the requested rows. This is negotiated before the first bucket.
++                if name in self.row_selections:
++                    lo, hi, target_name = self.row_selections[name]
++                    if not 0 <= lo <= hi <= weight.shape[0]:
++                        raise ValueError(f"Invalid receiver row selection for {name}")
++                    if lo == hi:
++                        continue
++                    weight = weight[lo:hi]
++                    name = target_name
+                 # model parameters are in fp32 full precision
+                 # (vermouth1992) we should not force cast weight here because some parameters
+                 # (such as moe gate) have to keep fp32 precision. If a weight is bf16 in the rollout side,
+@@ -178,10 +189,18 @@ class BucketedWeightSender:
+             shm = create_shared_memory(self.bucket_size, shm_name)
+             buffer = torch.frombuffer(shm.buf, dtype=torch.uint8)
+ 
+-            comm_metadata = {"name": shm_name, "size": self.bucket_size}
++            comm_metadata = {"name": shm_name, "size": self.bucket_size, "row_selection_protocol": "rows_v1"}
+             self.socket.send_pyobj(comm_metadata)
+ 
+-        self.socket.recv()
++        self.buffer = buffer
++        self.shm = shm
++        reply = self.socket.recv()
++        self.row_selections = {}
++        if reply:
++            request = json.loads(reply)
++            if not self.use_shm or request.get("protocol") != "rows_v1":
++                raise ValueError("Unsupported weight receiver selection protocol")
++            self.row_selections = request["rows"]
+         self.buffer = buffer
+         self.shm = shm
+ 
+@@ -230,14 +249,25 @@ class BucketedWeightReceiver:
+         self.buffer = None
+         self.shm = None
+ 
+-    def receive_weights(self, on_bucket_received: callable):
++    def receive_weights(
++        self, on_bucket_received: callable, *,
++        keep_on_cpu: Callable[[str], bool] | None = None,
++        row_selections: dict | None = None,
++    ):
+         """
+         Receive weights from sender and process each bucket via callback.
+ 
+         Args:
+             on_bucket_received: Callback function(weights: list[(name, tensor)]) called per bucket.
++            keep_on_cpu: Optional SHM policy for weights whose loader slices on CPU.
++                CPU views are valid only until the callback completes and the bucket is acknowledged.
++            row_selections: Optional SHM mapping from source names to [start, end, target_name].
++                Empty intervals are omitted. Names absent from the mapping are transferred unchanged.
+         """
+         try:
++            if row_selections and not self.use_shm:
++                raise ValueError("Row selection requires SHM")
++            self.row_selections = row_selections or {}
+             self._init_socket()
+             self._init_buffer()
+ 
+@@ -249,7 +279,7 @@ class BucketedWeightReceiver:
+                     shape, dtype, offset = meta["shape"], meta["dtype"], meta["offset"]
+                     size = dtype.itemsize * shape.numel()
+                     tensor = self.buffer[offset : offset + size].view(dtype=dtype).view(shape)
+-                    if self.use_shm:
++                    if self.use_shm and not (keep_on_cpu is not None and keep_on_cpu(name)):
+                         tensor = tensor.to(self.device)
+                     weights.append((name, tensor))
+                 on_bucket_received(weights)
+@@ -278,7 +308,12 @@ class BucketedWeightReceiver:
+             shm_name = comm_metadata["name"]
+             shm_size = comm_metadata["size"]
+             buffer, shm = rebuild_shared_memory(shm_name, shm_size, dtype=torch.uint8)
+-        self.socket.send(b"")
++        self.buffer = buffer
++        self.shm = shm
++        request = getattr(self, "row_selections", {})
++        if request and comm_metadata.get("row_selection_protocol") != "rows_v1":
++            raise RuntimeError("Sender lacks row selection support; deploy matching sender and receiver code")
++        self.socket.send(json.dumps({"protocol": "rows_v1", "rows": request}).encode() if request else b"")
+         self.buffer = buffer
+         self.shm = shm
+ 
+diff --git a/verl/workers/rollout/vllm_rollout/utils.py b/verl/workers/rollout/vllm_rollout/utils.py
+index b9f013aaf3974d03eec9abd7265825d749c6beb1..73882bebad03b9044817b3c39d7659d6914418af 100644
+--- a/verl/workers/rollout/vllm_rollout/utils.py
++++ b/verl/workers/rollout/vllm_rollout/utils.py
+@@ -27,7 +27,6 @@ from vllm.outputs import RequestOutput
+ from verl.utils.device import is_npu_available
+ from verl.utils.vllm import TensorLoRARequest, VLLMHijack
+ from verl.utils.vllm.patch import patch_vllm_moe_model_weight_loader
+-from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches, is_fp8_model, load_quanted_weights
+ 
+ try:
+     from vllm_omni.diffusion.worker.diffusion_worker import CustomPipelineWorkerExtension
+@@ -427,3 +426,18 @@ def extract_prompt_logprobs(output: RequestOutput, num_prompt_logprobs: Optional
+ 
+     result_dict["prompt_ids"] = prompt_ids_ls
+     result_dict["prompt_logprobs"] = prompt_logprobs_ls
++
++
++def apply_vllm_fp8_patches(*args, **kwargs):
++    from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches as implementation
++    return implementation(*args, **kwargs)
++
++
++def is_fp8_model(*args, **kwargs):
++    from verl.utils.vllm.vllm_fp8_utils import is_fp8_model as implementation
++    return implementation(*args, **kwargs)
++
++
++def load_quanted_weights(*args, **kwargs):
++    from verl.utils.vllm.vllm_fp8_utils import load_quanted_weights as implementation
++    return implementation(*args, **kwargs)
+diff --git a/verl/workers/rollout/vllm_rollout/vllm_async_server.py b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+index 54e49e602a20d3c6f249537c8d986e4bdf3844d0..04354f9be01c0173a86551b1ea54cdf2459b0b4b 100644
+--- a/verl/workers/rollout/vllm_rollout/vllm_async_server.py
++++ b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+@@ -40,7 +40,6 @@ from verl.utils.device import get_resource_name, get_visible_devices_keyword, is
+ from verl.utils.net_utils import get_free_port, is_valid_ipv6_address
+ from verl.utils.profiler import DistProfiler, build_vllm_profiler_args
+ from verl.utils.tokenizer import normalize_token_ids
+-from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches
+ from verl.workers.config import HFModelConfig, RolloutConfig
+ from verl.workers.config.rollout import get_engine_pcp_size
+ from verl.workers.rollout.replica import RolloutMode, RolloutReplica, TokenOutput
+@@ -62,22 +61,27 @@ if _VLLM_VERSION >= version.parse("0.13.0"):
+     _RESET_PREFIX_CACHE_KWARGS["reset_connector"] = True
+ 
+ 
+-if _VLLM_VERSION > version.parse("0.11.0"):
++# Source/editable builds can report a placeholder version. Resolve the API by
++# its actual module location instead of routing them to the obsolete import.
++try:
+     from vllm.utils.argparse_utils import FlexibleArgumentParser
++except ModuleNotFoundError as exc:
++    if exc.name != "vllm.utils.argparse_utils":
++        raise
++    from vllm.utils import FlexibleArgumentParser
+ 
+-    if _VLLM_VERSION == version.parse("0.12.0"):
+-        from vllm.entrypoints.harmony_utils import get_encoding
+-
+-    elif _VLLM_VERSION >= version.parse("0.13.0"):
++# Harmony is only required for GPT-OSS. Do not import unrelated optional APIs
++# during BF16 V4/V4.1 server initialization.
++if os.getenv("VERL_USE_GPT_OSS", "0") == "1":
++    try:
+         from vllm.entrypoints.openai.parser.harmony_utils import get_encoding
+-
+-    else:
+-        get_encoding = None
+-
+-    if get_encoding is not None and os.getenv("VERL_USE_GPT_OSS", "0") == "1":
+-        get_encoding()
+-else:
+-    from vllm.utils import FlexibleArgumentParser
++    except ModuleNotFoundError as exc:
++        if exc.name not in (
++            "vllm.entrypoints.openai.parser", "vllm.entrypoints.openai.parser.harmony_utils"
++        ):
++            raise
++        from vllm.entrypoints.harmony_utils import get_encoding
++    get_encoding()
+ 
+ 
+ logger = logging.getLogger(__file__)
+@@ -274,6 +278,8 @@ class vLLMHttpServer:
+             "dtype": self.config.dtype,
+             "load_format": self.config.load_format,
+             "skip_tokenizer_init": False,
++            # Keep engine tokenization aligned with HFModelConfig, including cropped checkpoints.
++            "tokenizer": self.model_config.local_tokenizer_path or self.model_config.local_path,
+             "distributed_executor_backend": "mp",
+             "worker_extension_cls": self._get_worker_extension_cls(),
+             "trust_remote_code": True,
+@@ -1053,6 +1059,7 @@ class vLLMHttpServer:
+                 hf_overrides["quantization_config"] = dict(FP8_BLOCK_QUANT_KWARGS)
+                 # Apply vllm fp8 patches
+                 # Will remove the patch after vllm support on-the-fly quant for rollout natively.
++                from verl.utils.vllm.vllm_fp8_utils import apply_vllm_fp8_patches
+                 apply_vllm_fp8_patches()
+                 # for subprocesses patching
+                 os.environ["VERL_VLLM_FP8_QUANT_ENABLED"] = "1"
+@@ -1097,7 +1104,8 @@ class vLLMHttpServer:
+         # first request waiting indefinitely after the split wake-up. This is the
+         # sleep path used by the known-good RL version. The current rollout is
+         # DP=1, so this collective reaches every TP worker in the replica.
+-        await self.engine.collective_rpc("sleep", kwargs={"level": sleep_level})
++        from verl.utils.rollout_lifecycle import sleep_workers
++        await sleep_workers(self.engine, sleep_level)
+         if _VLLM_VERSION >= version.parse("0.17.0"):
+             await self.engine.reset_encoder_cache()
+ 
+@@ -1126,6 +1134,9 @@ class vLLMReplica(RolloutReplica):
+         )
+         self.server_class = ray.remote(vLLMHttpServer)
+ 
++    def _get_server_runtime_env(self, env_vars):
++        return {"env_vars": env_vars}
++
+     async def launch_servers(self):
+         """Launch http server in each node."""
+         assert len(self.workers) == self.world_size, (
+@@ -1189,6 +1200,7 @@ class vLLMReplica(RolloutReplica):
+                 "ACL_DEVICE_SYNC_TIMEOUT",
+                 "ACL_STREAM_TIMEOUT",
+                 "VLLM_ASCEND_ENABLE_NZ",
++                "V41_TRACE_WEIGHT_LOAD",
+                 "VLLM_DP_POLLING_LOAD_BALANCE_ENABLE",
+                 "VLLM_RPC_TIMEOUT",
+                 "VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS",
+@@ -1223,7 +1235,7 @@ class vLLMReplica(RolloutReplica):
+                     node_id=node_id,
+                     soft=False,
+                 ),
+-                runtime_env={"env_vars": env_vars},
++                runtime_env=self._get_server_runtime_env(env_vars),
+                 name=name,
+                 max_concurrency=self.max_concurrency,
+             ).remote(

@@ -17,13 +17,30 @@ def load_source(root, name, component, profile):
     source = manifest_sources(json.loads(manifest.read_text()), profile)[name]
     if source["commit"] != component["profiles"][profile]["commit"] or source["repository"] != component["repository"]:
         raise RuntimeError(f"Registry and patch manifest disagree: {name}")
+    return source, checked_patches(manifest, source)
+
+
+def checked_patches(manifest, source):
     patches = []
     for filename, checksum in patch_specs(source):
         patch = (manifest.parent / filename).resolve()
         if hashlib.sha256(patch.read_bytes()).hexdigest() != checksum:
             raise RuntimeError(f"Patch checksum mismatch: {patch}")
         patches.append(patch)
-    return source, patches
+    return patches
+
+
+def load_legacy_sources(root, name, component):
+    """Recognize previous managed trees for a verified upgrade, not for selection."""
+    manifest = root / component["source_manifest"]
+    sources = json.loads(manifest.read_text()).get("legacy_sources", {}).get(name, [])
+    commits = {entry["commit"] for entry in component["profiles"].values()}
+    result = []
+    for source in sources:
+        if source["repository"] != component["repository"] or source["commit"] not in commits:
+            raise RuntimeError(f"Invalid legacy source baseline: {name}")
+        result.append((source, checked_patches(manifest, source)))
+    return result
 
 
 def inspect_checkout(checkout, sources):

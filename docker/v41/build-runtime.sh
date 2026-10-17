@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build only image-owned frameworks and native operators. No recipe runtime or forks are installed.
+# Build only image-owned frameworks and native operators. No recipe runtime or source dependencies are installed.
 set -eo pipefail
 ROOT=/opt/ascend-training
 INPUT=/tmp/ascend-image-build/locks

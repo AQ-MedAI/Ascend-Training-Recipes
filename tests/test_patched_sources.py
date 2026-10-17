@@ -132,5 +132,25 @@ class PatchedSourceTest(unittest.TestCase):
             verify(self.repo, baseline, tracked=True)
 
 
+    def test_legacy_upgrade_and_patch_integrity(self):
+        from patched_sources import load_legacy_sources
+
+        second, patches = self.make_second_profile()
+        manifest = self.root / "manifest.json"
+        manifest.write_text(json.dumps({"legacy_sources": {"source": [self.source]}}))
+        component = {
+            "source_manifest": "manifest.json",
+            "repository": self.source["repository"],
+            "profiles": {"v4": {"commit": self.source["commit"]}},
+        }
+        legacy = load_legacy_sources(self.root, "source", component)
+        ensure_source(self.repo, second, patches, legacy)
+        self.assertTrue(is_prepared(self.repo, second))
+        self.patch.write_text("tampered")
+        with self.assertRaisesRegex(RuntimeError, "Patch checksum"):
+            load_legacy_sources(self.root, "source", component)
+        self.assertTrue(is_prepared(self.repo, second))
+
+
 if __name__ == "__main__":
     unittest.main()

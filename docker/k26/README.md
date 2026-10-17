@@ -26,6 +26,6 @@ success. Next steps before publishing a runtime image:
 4. Install Core/Bridge, run the complete verl Bridge imports, then validate four-layer
    RL and MOPD including optimizer updates, rollout synchronization and checkpoint restore.
 
-Use `aq/k26-integration` for the recipe's verl fork. All Ray nodes must use the same
+Run `bash tools/setup_sources.sh k26` to prepare the pinned upstream verl with its K2.6 patch. This command selects only verl. All Ray nodes must use the same
 runtime and absolute paths. `recipes/kimi-k2.6/runtime_env.sh` selects the intended
 source paths and checks the actual Core/Bridge imports before launching training.

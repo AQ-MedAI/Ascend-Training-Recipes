@@ -58,7 +58,7 @@ COPY docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
 RUN python3 /tmp/ascend-image-build/tools/prepare_framework_sources.py \
     --root /opt/ascend-training --manifest /tmp/ascend-image-build/dependencies/framework-sources.json
 
-# Only image-owned sources are built here; recipe forks/runtime are installed after cloning.
+# Only image-owned sources are built here; recipe dependencies/runtime are installed after cloning.
 COPY dependencies/registry.json /tmp/ascend-image-build/registry.json
 # A complete runtime lock is optional for development builds; fixed inputs are included.
 COPY docker/v41/locks/ /tmp/ascend-image-build/locks/

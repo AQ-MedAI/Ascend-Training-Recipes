@@ -1,19 +1,21 @@
-"""Initialize pinned forks and apply managed patches to upstream submodules."""
+"""Initialize pinned upstream submodules and apply managed profile patches."""
 
 import argparse
 import json
 import subprocess
 from pathlib import Path
 
-from patched_sources import ensure_source, inspect_checkout, load_source
+from patched_sources import ensure_source, inspect_checkout, load_legacy_sources, load_source
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("profile", choices=("v41", "v4"), nargs="?", default="v41")
+    parser.add_argument("profile", choices=("v41", "v4", "k26"), nargs="?", default="v41")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     components = json.loads((root / "dependencies/registry.json").read_text())["components"]
+    # K26 currently pins only verl; do not substitute V4.1 dependencies.
+    components = {name: component for name, component in components.items() if args.profile in component["profiles"]}
     paths = ["third_party/" + name for name in components]
     patched = {}
 
@@ -30,6 +32,7 @@ def main():
                 for profile in component["profiles"]
                 if profile != args.profile
             ]
+            alternatives.extend(load_legacy_sources(root, name, component))
             inspect_checkout(checkout, [source, *(entry[0] for entry in alternatives)])
             patched[name] = (source, patch, alternatives)
         elif (checkout / ".git").exists():
@@ -71,6 +74,10 @@ def main():
         if exists.returncode:
             git("-C", path, "fetch", "--no-tags", "origin", sha)
         git("-C", path, "checkout", "--detach", sha)
+    if args.profile == "k26":
+        print(
+            "K26 selects verl only; matching MindSpeed, Megatron and runtime dependencies remain separately required."
+        )
     print(f"Sources selected: {args.profile}. Upstream submodules use verified profile patches.")
 
 

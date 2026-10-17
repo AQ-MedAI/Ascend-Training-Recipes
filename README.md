@@ -14,7 +14,7 @@ DeepSeek V4、V4.1 与 Kimi K2.6 在 Ascend NPU 上的 GRPO、OPD 和 MOPD 训�
 
 ## 拉取源码
 
-新环境克隆 recipe 后，运行源码初始化脚本即可自动拉齐 verl fork 和打补丁的上游 MindSpeed、MindSpeed-LLM、mbridge：
+新环境克隆 recipe 后，运行源码初始化脚本即可自动拉齐 四个打补丁的上游依赖：MindSpeed、MindSpeed-LLM、mbridge、verl：
 
 ```bash
 git clone https://github.com/AQ-MedAI/Ascend-Training-Recipes.git
@@ -29,13 +29,13 @@ git pull --ff-only
 bash tools/setup_sources.sh v41
 ```
 
-四个依赖位于 `third_party/{MindSpeed,MindSpeed-LLM,mbridge,verl}`，按 recipe 记录的提交检出，不跟随分支最新版本。MindSpeed、MindSpeed-LLM 和 mbridge 使用上游固定提交加本仓库补丁；重复运行会验证并保留该补丁。存在额外源码修改时，初始化脚本会停止更新。V4.1 启动脚本默认使用这些目录，也可分别设置 `MINDSPEED_ROOT`、`MINDSPEED_LLM_ROOT`、`MBRIDGE_ROOT`、`VERL_ROOT` 使用其他 checkout。
+四个依赖位于 `third_party/{MindSpeed,MindSpeed-LLM,mbridge,verl}`，按 recipe 记录的提交检出，不跟随分支最新版本。四个依赖使用上游固定提交加本仓库补丁；重复运行会验证并保留该补丁。存在额外源码修改时，初始化脚本会停止更新。V4.1 启动脚本默认使用这些目录，也可分别设置 `MINDSPEED_ROOT`、`MINDSPEED_LLM_ROOT`、`MBRIDGE_ROOT`、`VERL_ROOT` 使用其他 checkout。
 
 Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --recurse-submodules`，但它还会下载框架内嵌的上游子模块（包括 GitCode 仓库）；这些依赖的版本不代表已通过本 recipe 验证。推荐上述初始化脚本，拉取已登记版本并应用对应配置的补丁；单独使用 `git clone --recurse-submodules` 不会应用补丁，仍需执行 `bash tools/setup_sources.sh`。
 
 各模型的仓库和固定提交记录在 [dependencies/registry.json](dependencies/registry.json)，它不是完整环境 lockfile。默认源码组合面向 V4.1。V4、K2.6 的版本差异见[依赖说明](docs/DEPENDENCIES.md)；克隆源码不会安装软件包、编译算子或下载模型。
 
-镜像中完成源码初始化后，执行 `bash tools/setup_environment.sh v41` 和 `source tools/activate.sh v41`。V4 可以选择 `setup_sources.sh v4`，其完整镜像组合仍待验证。
+镜像中完成源码初始化后，执行 `bash tools/setup_environment.sh v41` 和 `source tools/activate.sh v41`。`setup_sources.sh v4` 与 `setup_sources.sh v41` 准备完全相同的四个源码依赖；在同一镜像中通过各自训练脚本选择模型，无需切换依赖源码。公开镜像组合仍需 NPU 验收。
 
 公开镜像候选构建文件与待补齐材料见 [V4.1 镜像说明](docker/v41/README.md)。当前尚未完成镜像构建和 NPU 验收。框架源码也可以使用公共工具在本地准备，见[补丁与源码准备说明](patches/README.md)。
 
@@ -51,7 +51,7 @@ Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --r
 recipes/       # 模型配置、启动与诊断脚本
 dependencies/  # recipe 依赖登记、框架基线与补丁校验清单
 patches/       # 按框架组织的源码适配补丁
-third_party/   # verl fork 和上游 MindSpeed、MindSpeed-LLM、mbridge 子模块（默认 V4.1 基线）
+third_party/   # 上游 MindSpeed、MindSpeed-LLM、mbridge、verl 子模块（默认 V4.1 基线）
 docs/          # 依赖、验证与来源说明
 tools/         # 源码/环境初始化、CPU 与启动参数检查
 workspace/     # 与固定 verl 入口兼容的 V4.1 Python runtime
@@ -65,3 +65,5 @@ licenses/      # 第三方许可证
 ## 来源与许可证
 
 源码来源见 [来源说明](docs/PROVENANCE.md)。本仓库许可证见 [LICENSE](LICENSE)，第三方声明见 [verl 许可证](licenses/verl-LICENSE) 和 [verl-ascend-recipe 许可证](licenses/verl-ascend-recipe-LICENSE)。框架、模型与数据遵循各自许可证。
+
+K2.6 使用 `bash tools/setup_sources.sh k26`，仅准备 verl 的 K2.6 基线与补丁；其他依赖和运行环境需另行准备，见 [K2.6](recipes/kimi-k2.6/README.md)。

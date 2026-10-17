@@ -19,7 +19,7 @@ reward, log and shared-cache paths before use; some profiles still set paths dir
 
 ## Four-layer RL smoke test
 
-Use the `aq/k26-integration` verl revision and a compatible K26 runtime on every node.
+Run `bash tools/setup_sources.sh k26` to prepare the pinned upstream verl with `patches/verl/k26.patch`. This selects only verl; provide a compatible K26 runtime and its other dependencies on every node.
 The RL entry defaults to `third_party/verl`; override `VERL_ROOT` when needed.
 `vanilla_mbridge=False` selects Megatron-Bridge, not AQ mbridge. Do not assume that the
 V4/V4.1 MindSpeed, Megatron or native operator combination is compatible with K26.
@@ -60,7 +60,7 @@ for other topologies. NPU execution and peak memory for this profile remain unva
 For full-model RL, use `kimi_k26_rl.sh`. Multi-node jobs require a running Ray cluster
 and identical source, model, data and runtime paths on every node. Teacher models used
 for full-vocabulary KL must have compatible tokenizers and vocabularies. Shared teacher
-profiles additionally depend on the corresponding scheduling support in the K26 fork.
+profiles additionally depend on the corresponding scheduling support in the K26 patch.
 
 See [dependencies](../../docs/DEPENDENCIES.md) and [validation](../../docs/VALIDATION.md).
 

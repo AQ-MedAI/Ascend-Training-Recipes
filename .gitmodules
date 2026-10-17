@@ -9,4 +9,4 @@
 	url = https://github.com/ISEEKYAN/mbridge.git
 [submodule "verl"]
 	path = third_party/verl
-	url = https://github.com/AQ-MedAI/verl.git
+	url = https://github.com/verl-project/verl.git
