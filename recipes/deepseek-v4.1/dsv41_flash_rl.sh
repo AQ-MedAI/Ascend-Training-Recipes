@@ -6,16 +6,16 @@ if (( $# != 0 )); then
     exit 2
 fi
 
-# Fork sources default to the pinned submodules; external runtimes use DEPENDENCY_ROOT.
+# Frameworks default to the prepared image; individual roots support development overrides.
 RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEPENDENCY_ROOT="${DEPENDENCY_ROOT:-/opt/ascend-training}"
-VERL_ROOT="${VERL_ROOT:-${RECIPE_ROOT}/third_party/verl}"
-MEGATRON_ROOT="${MEGATRON_ROOT:-${DEPENDENCY_ROOT}/Megatron-LM}"
-MINDSPEED_ROOT="${MINDSPEED_ROOT:-${RECIPE_ROOT}/third_party/MindSpeed}"
-MINDSPEED_LLM_ROOT="${MINDSPEED_LLM_ROOT:-${RECIPE_ROOT}/third_party/MindSpeed-LLM}"
-MBRIDGE_ROOT="${MBRIDGE_ROOT:-${RECIPE_ROOT}/third_party/mbridge}"
-VLLM_ROOT="${VLLM_ROOT:-${DEPENDENCY_ROOT}/vllm}"
-VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-${DEPENDENCY_ROOT}/vllm-ascend}"
+VERL_ROOT="${VERL_ROOT:-${DEPENDENCY_ROOT}/third_party/verl}"
+MEGATRON_ROOT="${MEGATRON_ROOT:-${DEPENDENCY_ROOT}/third_party/Megatron-LM}"
+MINDSPEED_ROOT="${MINDSPEED_ROOT:-${DEPENDENCY_ROOT}/third_party/MindSpeed}"
+MINDSPEED_LLM_ROOT="${MINDSPEED_LLM_ROOT:-${DEPENDENCY_ROOT}/third_party/MindSpeed-LLM}"
+MBRIDGE_ROOT="${MBRIDGE_ROOT:-${DEPENDENCY_ROOT}/third_party/mbridge}"
+VLLM_ROOT="${VLLM_ROOT:-${DEPENDENCY_ROOT}/third_party/vllm}"
+VLLM_ASCEND_ROOT="${VLLM_ASCEND_ROOT:-${DEPENDENCY_ROOT}/third_party/vllm-ascend}"
 
 export RECIPE_ROOT DEPENDENCY_ROOT VERL_ROOT MINDSPEED_ROOT MINDSPEED_LLM_ROOT MBRIDGE_ROOT MEGATRON_ROOT VLLM_ROOT VLLM_ASCEND_ROOT
 export V41_CONFIG_SOURCE="${V41_CONFIG_SOURCE:-$VLLM_ASCEND_ROOT/vllm_ascend/deepseek_v41_config.py}"

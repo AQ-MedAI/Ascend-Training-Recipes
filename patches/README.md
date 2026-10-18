@@ -12,7 +12,15 @@ The active source manifest is [dependencies/framework-sources.json](../dependenc
 - `mbridge/`: upstream v0.15.1 plus a managed adaptation, prepared by `tools/setup_sources.sh`. See [mbridge](mbridge/README.md).
 - `megatron-lm/legacy/`: an older patch retained for provenance; not selected by the active manifest or included in the image build. Its receipt is in `dependencies/legacy/`.
 
-## Prepare sources locally
+## Prepare image sources
+
+```bash
+python tools/prepare_image_sources.py --root /path/to/image-sources
+```
+
+This prepares all seven V4/V4.1 dependencies and rejects different V4/V4.1 training-source inventories. The Docker build uses the same tool, installs all seven repositories and compiles native operators. Runtime defaults point to the image's `/opt/ascend-training/third_party/` directory. Recipe submodules remain available for explicit development overrides.
+
+## Prepare framework sources locally
 
 From the recipe repository root:
 

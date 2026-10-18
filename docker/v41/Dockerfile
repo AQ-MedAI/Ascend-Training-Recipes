@@ -48,18 +48,16 @@ ARG MAX_JOBS=4
 ARG DEPENDENCY_OFFLINE=0
 ARG PYTHON_DEPENDENCY_MODE=resolve
 ENV DEPENDENCY_ROOT=/opt/ascend-training \
-    MEGATRON_ROOT=/opt/ascend-training/Megatron-LM \
+    MEGATRON_ROOT=/opt/ascend-training/third_party/Megatron-LM \
     SOC_VERSION=${SOC_VERSION}
-# Reconstruct all three sibling source trees from public commits and checked patches.
-COPY dependencies/framework-sources.json /tmp/ascend-image-build/dependencies/framework-sources.json
+# Reconstruct all seven dependencies from fixed public commits and checked patches.
+COPY dependencies/ /tmp/ascend-image-build/dependencies/
 COPY patches/ /tmp/ascend-image-build/patches/
-COPY tools/prepare_framework_sources.py /tmp/ascend-image-build/tools/prepare_framework_sources.py
+COPY tools/prepare_framework_sources.py tools/prepare_image_sources.py /tmp/ascend-image-build/tools/
 COPY docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
-RUN python3 /tmp/ascend-image-build/tools/prepare_framework_sources.py \
-    --root /opt/ascend-training --manifest /tmp/ascend-image-build/dependencies/framework-sources.json
+RUN python3 /tmp/ascend-image-build/tools/prepare_image_sources.py \
+    --root /opt/ascend-training/third_party --inputs /tmp/ascend-image-build
 
-# Only image-owned sources are built here; recipe dependencies/runtime are installed after cloning.
-COPY dependencies/registry.json /tmp/ascend-image-build/registry.json
 # A complete runtime lock is optional for development builds; fixed inputs are included.
 COPY docker/v41/locks/ /tmp/ascend-image-build/locks/
 COPY docker/v41/build-support/prepare_native_deps.py /opt/ascend-training/workspace/rollout/dsv41/
@@ -71,8 +69,12 @@ RUN --mount=type=cache,target=/root/.cache/ascend-training-recipes \
     PIP_CACHE_DIR=/root/.cache/pip UV_CACHE_DIR=/root/.cache/uv MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" PYTHON_DEPENDENCY_MODE="${PYTHON_DEPENDENCY_MODE}" bash /tmp/ascend-image-build/build-runtime.sh
 
 # Training and rollout share Python dependencies; native loader settings remain role-specific.
-ENV VLLM_ROOT=/opt/ascend-training/vllm \
-    VLLM_ASCEND_ROOT=/opt/ascend-training/vllm-ascend \
+ENV VERL_ROOT=/opt/ascend-training/third_party/verl \
+    MINDSPEED_ROOT=/opt/ascend-training/third_party/MindSpeed \
+    MINDSPEED_LLM_ROOT=/opt/ascend-training/third_party/MindSpeed-LLM \
+    MBRIDGE_ROOT=/opt/ascend-training/third_party/mbridge \
+    VLLM_ROOT=/opt/ascend-training/third_party/vllm \
+    VLLM_ASCEND_ROOT=/opt/ascend-training/third_party/vllm-ascend \
     V41_MHC_PRE_BACKEND=premix \
     V41_INDEXER_BACKEND=lightning \
     V41_RMSNORM_BACKEND=native \
@@ -82,7 +84,21 @@ ENV VLLM_ROOT=/opt/ascend-training/vllm \
     OMP_NUM_THREADS=1 \
     MKL_NUM_THREADS=1 \
     VLLM_WORKER_MULTIPROC_METHOD=spawn
+# Bundle the matching recipe after expensive framework builds to preserve layer caching.
+ARG RECIPE_REVISION=unspecified
+ENV RECIPE_ROOT=/opt/ascend-training/Ascend-Training-Recipes \
+    RECIPE_PROFILE=v41
+COPY . /opt/ascend-training/Ascend-Training-Recipes/
+RUN test ! -e "$RECIPE_ROOT/third_party" && test ! -e "$RECIPE_ROOT/.git" && \
+    test -f "$RECIPE_ROOT/workspace/rollout/dsv41/runtime/worker.py" && \
+    PYTHONDONTWRITEBYTECODE=1 python3 "$RECIPE_ROOT/tools/record_recipe.py" \
+        --root "$RECIPE_ROOT" --revision "$RECIPE_REVISION" \
+        --output /opt/ascend-training/manifest/recipe.json && \
+    bash -n "$RECIPE_ROOT/tools/activate.sh" \
+        "$RECIPE_ROOT/recipes/deepseek-v4/dsv4_flash_rl.sh" \
+        "$RECIPE_ROOT/recipes/deepseek-v4.1/dsv41_flash_rl.sh"
+LABEL org.opencontainers.image.revision="${RECIPE_REVISION}"
 COPY docker/v41/entrypoint.sh /usr/local/bin/v41-entrypoint
 ENTRYPOINT ["/bin/bash", "/usr/local/bin/v41-entrypoint"]
-WORKDIR /workspace/Ascend-Training-Recipes
+WORKDIR /opt/ascend-training/Ascend-Training-Recipes
 CMD ["/bin/bash"]

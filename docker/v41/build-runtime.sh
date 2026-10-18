@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Build only image-owned frameworks and native operators. No recipe runtime or source dependencies are installed.
+# Install all shared V4/V4.1 dependencies and build native operators.
 set -eo pipefail
 ROOT=/opt/ascend-training
+SOURCES=$ROOT/third_party
 INPUT=/tmp/ascend-image-build/locks
 # Check installation inputs before fetching or compiling.
 for lock in build; do
@@ -35,10 +36,10 @@ else
         --overrides "$INPUT/runtime-overrides.txt" \
         ${install_args[@]+"${install_args[@]}"} -r "$INPUT/runtime.in"
 fi
-"$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$ROOT/Megatron-LM"
+"$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$SOURCES/Megatron-LM"
 rollout="$ROOT/workspace/rollout/dsv41"
 mkdir -p "$rollout/build-src"
-export VLLM_ROOT="$ROOT/vllm" VLLM_ASCEND_ROOT="$ROOT/vllm-ascend"
+export VLLM_ROOT="$SOURCES/vllm" VLLM_ASCEND_ROOT="$SOURCES/vllm-ascend"
 download_args=()
 [[ "${DEPENDENCY_OFFLINE:-0}" != 1 ]] || download_args+=(--offline)
 "$PYTHON_BIN" /tmp/ascend-image-build/download_dependencies.py --workspace "$ROOT/workspace" "${download_args[@]}"
@@ -61,6 +62,31 @@ export ROLLOUT_PYTHON="$PYTHON_BIN"
 source workspace/tests/dsv41/native_operator_env.sh
 test -s "$V41_CSA2_NATIVE_LIBRARY"
 test -s "$build_root/mhc-premix/env.sh"
+# Install shared training sources after the framework/operator layer.
+export PYTHONPATH="$SOURCES/MindSpeed:$SOURCES/MindSpeed-LLM:$SOURCES/mbridge:$SOURCES/verl:$SOURCES/Megatron-LM:$VLLM_ASCEND_ROOT:$VLLM_ROOT:${PYTHONPATH:-}"
+for name in MindSpeed MindSpeed-LLM mbridge verl; do
+    "$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$SOURCES/$name"
+done
+# Check editable installs and training-source integrity before emitting a receipt.
+"$PYTHON_BIN" -I - <<'PY_SOURCES'
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+sys.path.insert(0, '/tmp/ascend-image-build/tools')
+from prepare_framework_sources import verify
+from prepare_image_sources import image_sources
+root = Path('/opt/ascend-training/third_party')
+packages = {'MindSpeed': 'mindspeed', 'MindSpeed-LLM': 'mindspeed_llm', 'mbridge': 'mbridge', 'verl': 'verl'}
+for name, source in image_sources(Path('/tmp/ascend-image-build'))[1].items():
+    checkout = root / name
+    verify(checkout, source, tracked=True)
+    actual = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
+    assert actual == source['commit'], (name, actual)
+    spec = importlib.util.find_spec(packages[name])
+    if spec is None or spec.origin is None or not Path(spec.origin).resolve().is_relative_to(checkout):
+        raise RuntimeError(f'Editable installation does not resolve to {checkout}: {spec}')
+PY_SOURCES
 # Report declared conflicts without blocking this compatibility deployment.
 if ! "$PYTHON_BIN" -m pip check; then
     echo 'Dependency metadata conflicts reported above; continuing with the fixed deployment versions.' >&2
@@ -81,10 +107,16 @@ expected.update({'numpy': '1.26.4', 'transformers': '5.14.1', 'fastapi': '0.123.
                  'prometheus-fastapi-instrumentator': '8.1.0', 'mcp': '2.2.0',
                  'model-hosting-container-standards': '0.1.16'})
 assert all(packages.get(k) == v for k,v in expected.items()), packages
-registry = json.loads((root/'registry.json').read_text())['rollout']['v41']
+registry = json.loads((root/'dependencies/registry.json').read_text())['rollout']['v41']
 receipt = {'profile':'v4-v41', 'python_environment':'single', 'vllm':registry['vllm']['commit'], 'vllm-ascend':registry['vllm_ascend']['commit'],
            'megatron':json.loads((root/'dependencies/framework-sources.json').read_text())['sources']['Megatron-LM']}
 receipt['sources'] = json.loads((root/'dependencies/framework-sources.json').read_text())
+import sys
+sys.path.insert(0, str(root / 'tools'))
+from prepare_image_sources import image_sources
+receipt['recipe_sources'] = image_sources(root)[1]
+receipt['source_root'] = '/opt/ascend-training/third_party'
+
 (manifest/'frameworks.json').write_text(json.dumps(receipt, indent=2)+'\n')
 PY
 
@@ -96,7 +128,7 @@ from pathlib import Path
 build = Path('/tmp/ascend-image-build')
 root = Path('/opt/ascend-training')
 for name in ('registry.json', 'native-dependencies.json', 'Megatron-LM-LICENSE'):
-    shutil.copy2(build / name, root / 'manifest' / name)
+    shutil.copy2((build / 'dependencies' / name) if name == 'registry.json' else (build / name), root / 'manifest' / name)
 # Preserve the same relative layout so the receipt can reconstruct sources too.
 shutil.copytree(build / 'dependencies', root / 'manifest/dependencies', dirs_exist_ok=True)
 shutil.copytree(build / 'patches', root / 'manifest/patches', dirs_exist_ok=True)

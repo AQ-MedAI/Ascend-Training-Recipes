@@ -12,32 +12,42 @@ DeepSeek V4、V4.1 与 Kimi K2.6 在 Ascend NPU 上的 GRPO、OPD 和 MOPD 训�
 | DeepSeek V4.1 Flash | 多节点 RL、单机验证配置 | [V4.1](recipes/deepseek-v4.1/README.md) |
 | Kimi K2.6 | GRPO、OPD、双教师 MOPD、教师共享 | [K2.6](recipes/kimi-k2.6/README.md) |
 
-## 拉取源码
+## 使用镜像内 recipe
 
-新环境克隆 recipe 后，运行源码初始化脚本即可自动拉齐 四个打补丁的上游依赖：MindSpeed、MindSpeed-LLM、mbridge、verl：
+V4/V4.1 镜像在构建时已准备七个框架和匹配的 recipe。默认工作目录为 `/opt/ascend-training/Ascend-Training-Recipes`，启动时自动加载环境，无需再 clone、初始化子模块、安装框架或打补丁。
 
-```bash
-git clone https://github.com/AQ-MedAI/Ascend-Training-Recipes.git
-cd Ascend-Training-Recipes
-bash tools/setup_sources.sh v41
-```
-
-已有 clone 或更新 recipe 后执行：
+进入容器后，先设置模型、数据、reward 和集群参数，再按模型说明运行脚本：
 
 ```bash
-git pull --ff-only
-bash tools/setup_sources.sh v41
+cd /opt/ascend-training/Ascend-Training-Recipes
+# 可选：检查预安装框架与依赖版本
+bash tools/setup_environment.sh v41
+# 配置好模型、数据和集群参数后启动
+bash recipes/deepseek-v4.1/dsv41_flash_rl.sh
 ```
 
-四个依赖位于 `third_party/{MindSpeed,MindSpeed-LLM,mbridge,verl}`，按 recipe 记录的提交检出，不跟随分支最新版本。四个依赖使用上游固定提交加本仓库补丁；重复运行会验证并保留该补丁。存在额外源码修改时，初始化脚本会停止更新。V4.1 启动脚本默认使用这些目录，也可分别设置 `MINDSPEED_ROOT`、`MINDSPEED_LLM_ROOT`、`MBRIDGE_ROOT`、`VERL_ROOT` 使用其他 checkout。
+V4 使用 `recipes/deepseek-v4/dsv4_flash_rl.sh`，同样使用镜像内环境。两个 profile 共用 `/opt/ascend-training/third_party/` 下的七个框架。模型、数据、凭据和训练输出通过运行时配置与挂载提供，镜像不会自动启动训练。全部 Ray 节点应使用相同镜像和 recipe 路径。
 
-Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --recurse-submodules`，但它还会下载框架内嵌的上游子模块（包括 GitCode 仓库）；这些依赖的版本不代表已通过本 recipe 验证。推荐上述初始化脚本，拉取已登记版本并应用对应配置的补丁；单独使用 `git clone --recurse-submodules` 不会应用补丁，仍需执行 `bash tools/setup_sources.sh`。
+构建从当前目录复制经过 Docker ignore 过滤的 recipe，版本记录在 `/opt/ascend-training/manifest/recipe.json`，包含逐文件 SHA-256 与源码快照摘要；可通过 `--build-arg RECIPE_REVISION=<commit>` 附加提交标识。构建和使用见 [镜像说明](docker/v41/README.md)。完整构建及 NPU 验收仍需在目标硬件上完成。
 
-各模型的仓库和固定提交记录在 [dependencies/registry.json](dependencies/registry.json)，它不是完整环境 lockfile。默认源码组合面向 V4.1。V4、K2.6 的版本差异见[依赖说明](docs/DEPENDENCIES.md)；克隆源码不会安装软件包、编译算子或下载模型。
+### 开发源码
 
-镜像中完成源码初始化后，执行 `bash tools/setup_environment.sh v41` 和 `source tools/activate.sh v41`。`setup_sources.sh v4` 与 `setup_sources.sh v41` 准备完全相同的四个源码依赖；在同一镜像中通过各自训练脚本选择模型，无需切换依赖源码。公开镜像组合仍需 NPU 验收。
+可将开发 recipe 挂载到另一目录，并设置 `RECIPE_ROOT` 与工作目录。例如：
 
-公开镜像候选构建文件与待补齐材料见 [V4.1 镜像说明](docker/v41/README.md)。当前尚未完成镜像构建和 NPU 验收。框架源码也可以使用公共工具在本地准备，见[补丁与源码准备说明](patches/README.md)。
+```bash
+docker run --rm -it \
+  -v "$PWD:/workspace/Ascend-Training-Recipes" \
+  -e RECIPE_ROOT=/workspace/Ascend-Training-Recipes \
+  -w /workspace/Ascend-Training-Recipes ascend-training-v41:dev
+```
+
+上例展示 recipe 覆盖方式；实际训练还需按机器配置挂载 NPU、驱动、模型和数据。
+
+镜像内 recipe 不带 Git 元数据。需要修改框架时，先在开发目录另行 clone 本仓库，再运行 `bash tools/setup_sources.sh v41` 在 recipe 的 `third_party/` 初始化四个开发子模块，然后显式设置对应的 `VERL_ROOT`、`MINDSPEED_ROOT`、`MINDSPEED_LLM_ROOT` 或 `MBRIDGE_ROOT`。激活脚本尊重这些覆盖。开发源码需要安装时，在目标 Python 中执行 `python -m pip install --no-deps --no-build-isolation -e <checkout>`；`setup_environment.sh` 只做校验，不安装或更新框架。
+
+`setup_sources.sh v4` 和 `v41` 准备相同源码。子模块不会自动覆盖镜像内框架。上游基线、补丁和校验清单见 [依赖说明](docs/DEPENDENCIES.md)；`dependencies/registry.json` 不是完整 Python lockfile。
+
+K2.6 保留独立基线和环境适配流程，见 [K2.6](recipes/kimi-k2.6/README.md)。`setup_sources.sh k26` 只准备它的 verl，不能替代完整 K2.6 环境。
 
 ## 使用前准备
 
@@ -51,7 +61,7 @@ Git 不会在普通 clone 后自动执行仓库脚本。也可用 `git clone --r
 recipes/       # 模型配置、启动与诊断脚本
 dependencies/  # recipe 依赖登记、框架基线与补丁校验清单
 patches/       # 按框架组织的源码适配补丁
-third_party/   # 上游 MindSpeed、MindSpeed-LLM、mbridge、verl 子模块（默认 V4.1 基线）
+third_party/   # 可选的框架开发子模块；运行默认使用镜像内源码
 docs/          # 依赖、验证与来源说明
 tools/         # 源码/环境初始化、CPU 与启动参数检查
 workspace/     # 与固定 verl 入口兼容的 V4.1 Python runtime

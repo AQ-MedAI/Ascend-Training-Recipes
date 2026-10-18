@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from patched_sources import is_prepared, load_source
+from prepare_image_sources import image_sources
 
 
 def main():
@@ -18,16 +19,30 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     registry = json.loads((root / "dependencies/registry.json").read_text())
+    dependency_root = Path(os.environ.get("DEPENDENCY_ROOT", "/opt/ascend-training"))
+    source_root = dependency_root / "third_party"
+    source_vars = {
+        "MindSpeed": "MINDSPEED_ROOT",
+        "MindSpeed-LLM": "MINDSPEED_LLM_ROOT",
+        "mbridge": "MBRIDGE_ROOT",
+        "verl": "VERL_ROOT",
+    }
     for name, component in registry["components"].items():
-        checkout = root / "third_party" / name
+        checkout = Path(os.environ.get(source_vars[name], str(source_root / name)))
         expected = component["profiles"][args.profile]["commit"]
         actual = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
         if actual != expected:
-            raise SystemExit(f"{name}: expected {expected}, found {actual}; run setup_sources.sh {args.profile}")
+            raise SystemExit(
+                f"{name}: expected {expected}, found {actual};"
+                "use the matching image or prepare an explicit development checkout"
+            )
         if component.get("source_manifest"):
             source, _ = load_source(root, name, component, args.profile)
             if not is_prepared(checkout, source):
-                raise SystemExit(f"{name}: managed patch is missing; run setup_sources.sh {args.profile}")
+                raise SystemExit(
+                    f"{name}: managed patch is missing;"
+                    "use the matching image or prepare an explicit development checkout"
+                )
     report_dir = Path(os.environ.get("V41_IMAGE_METADATA", "/opt/ascend-training/manifest"))
     receipt = report_dir / "frameworks.json"
     if not receipt.is_file():
@@ -35,6 +50,8 @@ def main():
     info = json.loads(receipt.read_text())
     if info.get("python_environment") != "single":
         raise SystemExit("Rebuild the V4.1 image with the unified Python environment")
+    if info.get("recipe_sources") != image_sources(root)[1]:
+        raise SystemExit("Image training sources/patches differ; rebuild the shared image")
     expected_rollout = registry["rollout"][args.profile]
     for name, key in [("vllm", "vllm"), ("vllm-ascend", "vllm_ascend")]:
         if info[name] != expected_rollout[key]["commit"]:
@@ -63,7 +80,7 @@ def main():
             raise SystemExit(f"{name} must be {version}")
     if args.profile == "v41":
         dependency_root = Path(os.environ.get("DEPENDENCY_ROOT", "/opt/ascend-training"))
-        ascend_root = Path(os.environ.get("VLLM_ASCEND_ROOT", str(dependency_root / "vllm-ascend")))
+        ascend_root = Path(os.environ.get("VLLM_ASCEND_ROOT", str(source_root / "vllm-ascend")))
         for required in (
             "vllm_ascend/deepseek_v41_config.py",
             "vllm_ascend/models/deepseek_v41/engram_hash.py",
@@ -77,7 +94,9 @@ def main():
                     "rebuild the shared image with the V4.1 backport patches"
                 )
         engram = registry["components"]["MindSpeed-LLM"]["profiles"]["v41"]
-        path = root / "third_party/MindSpeed-LLM" / engram["required_files"][0]
+        path = (
+            Path(os.environ.get("MINDSPEED_LLM_ROOT", str(source_root / "MindSpeed-LLM"))) / engram["required_files"][0]
+        )
         if hashlib.sha256(path.read_bytes()).hexdigest() != engram["engram_hash_sha256"]:
             raise SystemExit("Engram source checksum differs")
     rollout_python = Path(os.environ.get("ROLLOUT_PYTHON", sys.executable))

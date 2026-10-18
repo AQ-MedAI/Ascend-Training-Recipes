@@ -37,18 +37,17 @@ bash recipes/deepseek-v4/dsv4_flash_rl_8npu_cutlayer.sh
 
 ## 依赖布局
 
-V4 入口统一通过 `tools/v4_environment.sh` 初始化依赖：四个源码依赖 默认来自本仓库
-`third_party`，Megatron-LM 和 vLLM/vLLM-Ascend 来自镜像。默认镜像根目录为
-`/opt/ascend-training`，vLLM 和 vLLM-Ascend 默认位于该根目录下，与 Megatron-LM 同级；
-目录名称不代表 V4 已完成兼容性验证。使用旧 V4 镜像时显式指定实际源码目录：
+V4 入口通过 `tools/v4_environment.sh` 初始化七个预安装依赖，默认都在镜像的
+`/opt/ascend-training/third_party/` 下。V4/V4.1 共用源码，无需初始化 recipe 子模块。
+开发时可通过各 `*_ROOT` 显式覆盖；例如改变镜像依赖根目录：
 
 ```bash
 export DEPENDENCY_ROOT=/path/to/prepared-dependencies
-export VLLM_ROOT="$DEPENDENCY_ROOT/vllm"
-export VLLM_ASCEND_ROOT="$DEPENDENCY_ROOT/vllm-ascend"
+export VLLM_ROOT="$DEPENDENCY_ROOT/third_party/vllm"
+export VLLM_ASCEND_ROOT="$DEPENDENCY_ROOT/third_party/vllm-ascend"
 source tools/activate.sh v4
 ```
 
-运行前按 V4 依赖清单准备子模块；仅执行 `activate.sh v4` 不会切换 Git 提交。
+`activate.sh v4` 只设置运行环境，不执行下载、安装或 Git 切换。
 在每个节点保持源码和动态库路径一致，并从新的终端环境启动，避免沿用 V4.1 的专用配置。
 启动脚本会将源码路径、动态库路径传给 Ray；V4 不使用 V4.1 专用 QLI 初始化脚本。

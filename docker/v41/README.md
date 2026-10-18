@@ -1,16 +1,18 @@
 # Ascend 镜像与 recipe 分层
 
-**候选构建文件，尚未完成 Docker 构建或 NPU 验收。** 镜像提供稳定框架环境，recipe 提供四个源码依赖、runtime 和训练配置。
+**候选构建文件，尚未完成 Docker 构建或 NPU 验收。** 镜像提供稳定框架环境，镜像同时固化匹配的 recipe、runtime 和训练配置。
 
 | 层 | 内容 | 使用范围 |
 | --- | --- | --- |
 | `common` | CANN 9.1.0 A3、Ubuntu 22.04、Python 3.12、torch 2.10.0、torch-npu 2.10.0.post4、Triton Ascend 3.2.2、Triton 3.5.0 | V4/V4.1 的公共构建基础，不是完整训练环境 |
-| `v41` | Megatron-LM 基线加补丁、固定 vLLM/vLLM-Ascend、原生算子、训练与 rollout 共用的 Python 依赖 | V4/V4.1 共用源码；两个 profile 均需镜像/NPU 验收 |
-| recipe | 四个源码依赖、`workspace/rollout/dsv41/runtime`、启动与初始化脚本 | 运行时克隆，在全部 Ray 节点安装/激活 |
+| `v41` | 七个固定框架及补丁、原生算子、训练与 rollout 共用的 Python 依赖 | V4/V4.1 共用源码；两个 profile 均需镜像/NPU 验收 |
+| recipe | `workspace/rollout/dsv41/runtime`、启动脚本、配置与校验工具 | 构建时复制到镜像，启动时自动激活 |
 
 基础标签来自 [verl 上游 Dockerfile](https://github.com/verl-project/verl/blob/main/docker/ascend/Dockerfile.ascend_9.1.0_a3_v0.9.1)：`swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12`。正式发布仍需固定目标架构 digest。CANN/ATB、编译器及驱动配套须验收。当前构建目标沿用 `ascend910_9382`，与上游示例的 `9392` 不同，需按实际芯片确认。
 
-镜像构建不会克隆、安装上游 MindSpeed、MindSpeed-LLM、mbridge、verl，也不复制 recipe runtime。三个框架统一从 `dependencies/framework-sources.json` 读取公开基线、补丁与逐文件校验值，拉取并还原源码。框架位于 `/opt/ascend-training/`，版本收据位于 `/opt/ascend-training/manifest/frameworks.json`。
+镜像构建通过 `tools/prepare_image_sources.py` 准备全部七个源码仓库，统一放在 `/opt/ascend-training/third_party/`。Megatron-LM、vLLM、vLLM-Ascend 从 `dependencies/framework-sources.json` 读取版本，其余四个从 registry 指向的清单读取 V4/V4.1 共用版本。每个仓库都校验公开 commit、补丁 SHA-256 和完整文件清单，再进行安装；原生算子同时编译。
+
+构建收据位于 `/opt/ascend-training/manifest/frameworks.json`，包含七个框架的来源与补丁。匹配的 recipe 和 runtime 位于 `/opt/ascend-training/Ascend-Training-Recipes`。镜像不包含模型、数据和凭据。
 
 ## 固定框架
 
@@ -37,19 +39,22 @@ docker build --platform linux/arm64 --target v41 \
   -f docker/v41/Dockerfile -t ascend-training-v41:dev .
 ```
 
-容器运行后，在各节点的同一挂载路径准备 recipe：
+镜像启动后默认进入 `/opt/ascend-training/Ascend-Training-Recipes`，entrypoint 自动激活环境。无需 clone 或安装：
 
 ```bash
-git clone https://github.com/AQ-MedAI/Ascend-Training-Recipes.git
-cd Ascend-Training-Recipes
-bash tools/setup_sources.sh v41
+# 可选校验
 bash tools/setup_environment.sh v41
-source tools/activate.sh v41
+# 挂载并配置模型、数据、reward 和集群参数后执行
+bash recipes/deepseek-v4.1/dsv41_flash_rl.sh
 ```
 
-初始化先核对四个源码依赖 的 commit、镜像框架版本和 Engram 校验值，再执行 `pip install -e --no-deps --no-build-isolation`，最后报告依赖检查结果（声明冲突不阻断初始化）。不自动升级依赖或现场重建镜像算子。所有 Ray 节点需使用一致镜像、recipe 和路径，再按模型 README 启动训练。设备/驱动、共享内存和网络挂载需按机器配置。
+构建使用当前构建上下文的 recipe，排除 `.git`、开发子模块、缓存、模型和训练输出。`manifest/recipe.json` 保存文件 SHA-256、执行权限与源码快照摘要；可在构建命令增加 `--build-arg RECIPE_REVISION=<commit>` 记录提交标识（省略时仍保留文件摘要）。recipe 位于最后一层，修改启动配置不需要重新编译框架。
 
-V4 使用同一镜像，运行 `bash tools/setup_sources.sh v4`、`bash tools/setup_environment.sh v4` 和 `source tools/activate.sh v4`。源码和补丁已统一，仍须分别执行 V4/V4.1 冒烟测试；源码校验不代表算子或模型兼容性验收。
+开发时可将 recipe 挂载到 `/workspace/Ascend-Training-Recipes`，设置 `-e RECIPE_ROOT=/workspace/Ascend-Training-Recipes -w /workspace/Ascend-Training-Recipes`。启动时使用该目录的激活脚本；`*_ROOT` 可覆盖个别框架。NPU、驱动和数据挂载按实际机器配置。
+
+`setup_environment.sh` 核对镜像内四个训练框架的源码、七个框架的构建收据和 Python 版本。声明依赖冲突会报告；脚本不安装、升级依赖或现场重建算子。所有 Ray 节点需使用一致镜像、recipe 和路径，再按模型 README 启动训练。
+
+V4 直接使用对应训练脚本，或设置 `RECIPE_PROFILE=v4`。V4/V4.1 不需要执行 `setup_sources.sh`；七个依赖已安装在镜像中。两个模型仍须分别执行冒烟测试。开发时通过 `*_ROOT` 覆盖源码路径并显式安装开发 checkout。
 
 ## 仍待补齐
 
@@ -98,16 +103,16 @@ python3 docker/v41/download_dependencies.py \
 
 ## Framework source layout
 
-The image installs these editable source trees at sibling paths:
-
 ```text
-/opt/ascend-training/Megatron-LM
-/opt/ascend-training/vllm
-/opt/ascend-training/vllm-ascend
+/opt/ascend-training/
+├── third_party/                 # seven patched, installed framework repositories
+├── Ascend-Training-Recipes/     # bundled recipe and runtime; no nested third_party
+├── manifest/                   # framework, dependency and recipe snapshots
+└── workspace/rollout/dsv41/build-src/mhc-premix/  # installed operator runtime
 ```
 
 `workspace/rollout/dsv41/build-src` contains auxiliary builds such as MHC Premix,
-not the installed vLLM source trees. Recipe dependencies remain in `third_party` after cloning.
+not the installed vLLM source trees. All seven dependency repositories live in the image under `/opt/ascend-training/third_party`; recipe submodules are optional development checkouts.
 Existing images retain their original layout; rebuild to adopt these paths. For older
 images, explicitly set `VLLM_ROOT` and `VLLM_ASCEND_ROOT` to their installed locations.
 Moving editable source trees manually does not update their Python installation records.
@@ -147,4 +152,4 @@ python docker/v41/tests/check_v41_frontend_cpu.py --framework-root /opt/ascend-t
 
 This check loads the real source cache classes with device-facing imports stubbed. It does not load or test the native kernels.
 
-框架源码的 Git 拉取使用 HTTP/1.1，失败后最多尝试三次（间隔 5、10 秒），仍校验固定 commit 和完整源码。若该构建步骤最终失败，重新构建会重新执行整步源码准备；同一步内已下载的框架不会作为成功 Docker 层保留。此前已成功的构建层可继续使用缓存。
+七个框架源码的 Git 拉取使用 HTTP/1.1，失败后最多尝试三次（间隔 5、10 秒），仍校验固定 commit 和完整源码。若该构建步骤最终失败，重新构建会重新执行整步源码准备；同一步内已下载的框架不会作为成功 Docker 层保留。此前已成功的构建层可继续使用缓存。

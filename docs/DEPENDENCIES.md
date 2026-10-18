@@ -16,7 +16,9 @@
 
 复现实验应固定 commit，而非跟随分支最新版本。机器可读版本见 [registry.json](../dependencies/registry.json)。
 
-## 子模块与版本更新
+## 镜像源码与开发子模块
+
+V4/V4.1 镜像构建时准备、打补丁并安装全部七个依赖，统一在 `/opt/ascend-training/third_party/`。运行默认使用镜像源码；下文 recipe 子模块仅用于开发。`setup_environment.sh` 只验证安装环境，不重复安装框架。
 
 四个依赖均使用上游固定提交加补丁，分别见 [verl](../patches/verl/README.md)、 [MindSpeed](../patches/mindspeed/README.md)、[MindSpeed-LLM](../patches/mindspeed-llm/README.md) 和 [mbridge](../patches/mbridge/README.md)。框架格式遵循上游配置，补丁文件禁止自动格式化。
 
@@ -49,7 +51,7 @@ K2.6 的 MindSpeed、Megatron-LM、Megatron-Bridge 与 rollout 配套版本尚�
 
 ## 安装和验证
 
-在满足驱动、CANN、PyTorch/torch-npu 兼容性的环境中克隆对应框架并检出表中提交，再按各框架安装说明安装。所有 Ray 节点须使用一致的源码和包版本。本仓库暂不提供完整环境安装器或可直接运行的公共镜像。
+使用本仓库 Dockerfile 构建配套 V4/V4.1 镜像后，七个框架已按固定清单安装。镜像内 recipe 启动时自动激活环境，也可手动 `source tools/activate.sh v41`（或 `v4`），可用 `bash tools/setup_environment.sh v41` 检查。所有 Ray 节点须使用一致的镜像、源码和包版本。完整构建及 NPU 验收仍需在目标硬件上完成。
 
 补齐版本后，分别验证：模型加载、训练更新、rollout 权重同步、生成、checkpoint 保存与恢复。完整模型、裁层和教师共享配置应分别验收。CPU 检查范围见 [验证说明](VALIDATION.md)。
 
