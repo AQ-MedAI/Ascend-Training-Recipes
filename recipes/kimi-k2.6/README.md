@@ -81,3 +81,5 @@ baselines are pinned, but the new image is currently a source-only candidate.
 RL and the 16-NPU MOPD smoke launcher validate the selected Core/Bridge paths
 through `runtime_env.sh`; set `MEGATRON_ROOT` and `MEGATRON_BRIDGE_ROOT` when
 using an existing compatible K26 environment.
+
+For the external K2.6 Megatron baseline, apply the [optional TE compatibility patch](../../patches/megatron-lm/k26/README.md) to `/opt/ascend-training/Megatron-LM` before sourcing `runtime_env.sh`. The patch enables import with an incomplete TE shim for non-FP8 execution; it does not provide FP8 support.

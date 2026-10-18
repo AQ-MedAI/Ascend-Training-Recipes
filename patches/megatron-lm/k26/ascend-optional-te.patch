@@ -1,0 +1,28 @@
+--- a/megatron/core/tensor_parallel/random.py
++++ b/megatron/core/tensor_parallel/random.py
+@@ -28,8 +28,13 @@
+     from transformer_engine.pytorch.fp8 import FP8GlobalStateManager, fp8_autocast
+ 
+     HAVE_TE = True
+-except ModuleNotFoundError:
++except ImportError:
++    # MindSpeed can expose an importable TE shim without FP8 recompute APIs.
++    # Treat an incomplete optional backend like an absent TE installation.
+     HAVE_TE = False
++    activation_recompute_forward = None
++    FP8GlobalStateManager = None
++    fp8_autocast = None
+ 
+ 
+ # Default name for the model parallel rng tracker.
+@@ -633,7 +638,9 @@
+     """
+ 
+     def __init__(self, fp8=False):
+-        self.fp8 = fp8 is not None
++        self.fp8 = bool(fp8)
++        if self.fp8 and not HAVE_TE:
++            raise RuntimeError("FP8 activation recomputation requires a complete Transformer Engine backend")
+         self.run_function = None
+         self.fwd_cpu_rng_state = None
+         self.fwd_cuda_rng_state = None

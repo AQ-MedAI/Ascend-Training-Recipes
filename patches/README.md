@@ -3,7 +3,7 @@
 The active source manifest is [dependencies/framework-sources.json](../dependencies/framework-sources.json). It pins each public commit, patch order, patch SHA-256 and source-file inventory. Patch paths are relative to the manifest, independent of the current working directory.
 
 - `megatron-bridge/`: K2.6 optional PEFT import compatibility on a pinned upstream commit. See [Megatron-Bridge](megatron-bridge/README.md).
-- `megatron-lm/`: Megatron-LM adaptations.
+- `megatron-lm/`: Megatron-LM adaptations; the separate [K2.6 patch](megatron-lm/k26/README.md) targets its own pinned baseline.
 - `vllm/`: V4 baseline adaptations followed by the V4.1 backport.
 - `vllm-ascend/`: Ascend adaptations followed by the V4.1 backport.
 - `verl/`: shared V4/V4.1 layered patches and separate K2.6 adaptations on pinned upstream commits. See [verl](verl/README.md).
