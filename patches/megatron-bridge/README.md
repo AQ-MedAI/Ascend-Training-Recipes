@@ -87,3 +87,40 @@ logging behavior, the unavailable-symbol exception, and propagation of unexpecte
 import failures. This changes diagnostics only; it does not supply Apex kernels.
 
 Logging patch SHA-256: `42ffffbd690a9d1915dc7cae7909b294ac8c21702ff6735a6422816d1416240b`.
+
+
+## MindSpeed parallel-layer detection during weight conversion
+
+`ascend-automapping-sharding.patch` teaches Bridge AutoMapping to recognize the
+MindSpeed fused Norm+ColumnLinear and grouped column/row wrapper names.
+Previously `MindSpeedTELayerNormColumnParallelLinear` fell through to the generic
+normalization-name heuristic, so its projection weight was treated as replicated.
+At TP=8 a full KV up-projection tensor of `[16384, 512]` was returned for a local
+`[2048, 512]` target.
+
+The fused layer is handled by **parameter name**: `weight` and `bias` use column
+sharding; `layer_norm_weight` and `layer_norm_bias` remain replicated. Grouped
+column and row wrappers, including their performance variants, receive the
+corresponding type classification. This classification alone does not validate
+all performance-GMM conversion layouts.
+
+Apply while retaining all earlier Bridge patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C /opt/ascend-training/Megatron-Bridge apply --check "$PWD/patches/megatron-bridge/ascend-automapping-sharding.patch"
+git -C /opt/ascend-training/Megatron-Bridge apply "$PWD/patches/megatron-bridge/ascend-automapping-sharding.patch"
+```
+
+Restart workers and reuse the existing checkpoint. This patch changes mapping
+classification, not the source tensors, model dimensions, or shape validation.
+
+Validation reproduces the original wrong classification and checks fused
+projection/normalization distinctions and grouped wrapper classifications. A CPU
+regression executes the actual AutoMapping and ColumnParallelMapping tensor
+operations for the reported `[16384, 512]` tensor: eight local `[2048, 512]`
+shards have the correct values, and the reverse mapping reconstructs the original
+tensor under the original HF name. Distributed scatter/gather is simulated;
+HCCL/NPU communication and full rollout synchronization still need validation.
+
+AutoMapping sharding patch SHA-256: `180a9bd2ec330ad61247dee7f915b61b9ef55e15628b1159a7fee1f94ebf5866`.
