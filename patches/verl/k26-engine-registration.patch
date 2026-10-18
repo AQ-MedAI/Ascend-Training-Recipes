@@ -1,0 +1,21 @@
+--- a/verl/workers/engine/base.py
++++ b/verl/workers/engine/base.py
+@@ -312,9 +312,17 @@
+ 
+     @classmethod
+     def get_engine_cls(cls, model_type: str, backend: str):
++        device = get_device_name()
++        if backend == "megatron" and device not in cls._engines.get(model_type, {}).get(backend, {}):
++            # Optional package initialization suppresses ImportError. Retry in
++            # this worker so its real dependency failure reaches the driver.
++            import importlib
++
++            if device == "npu":
++                importlib.import_module("verl.workers.engine.mindspeed")
++            importlib.import_module("verl.workers.engine.megatron")
+         assert model_type in cls._engines, f"Unknown model_type: {model_type}"
+         assert backend in cls._engines[model_type], f"Unknown backend: {backend}"
+-        device = get_device_name()
+         assert device in cls._engines[model_type][backend], (
+             f"Unknown device: {device} for model_type: {model_type} and backend: {backend}"
+         )
