@@ -18,4 +18,4 @@ The submodule HEAD records the upstream commit; modified and untracked patch fil
 
 The source manifest also recognizes the previous V4-only tree for safe migration. It is not an active profile. Extra edits still stop migration.
 
-`k26-engine-registration.patch` retries explicit engine imports inside each worker before looking up a missing Megatron backend. NPU imports the MindSpeed wrapper first. Dependency ImportError is propagated instead of being replaced by an unknown-backend assertion. This improves registration and diagnostics; it does not supply missing dependencies.
+`k26-engine-registration.patch` retains the first optional engine ImportError and propagates it when the Megatron backend is selected. It never retries a partially initialized MindSpeed module; retrying can duplicate torch.compile patch registration. The runtime preflight initializes MindSpeed before Core/Bridge imports. Missing dependencies still need to be fixed in the selected environment.
