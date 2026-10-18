@@ -63,3 +63,27 @@ NPU forward/backward, optimizer steps, rollout synchronization, or checkpoint
 save/resume. All of those still require target-container validation.
 
 Text bridge patch SHA-256: `f317a27757ed1f2dfb14705f001c2d2ef923b490755ffc163e2b0cc22208505d`.
+
+
+## Optional import diagnostics
+
+`ascend-optional-import-logging.patch` changes the caught missing-symbol message
+in `safe_import_from` from INFO to DEBUG, matching the existing missing-module
+behavior. This avoids a traceback at normal logging levels when the MindSpeed
+Apex shim lacks the optional `MixedFusedLayerNorm` symbol. DEBUG logging retains
+the traceback. Availability flags, fallbacks, and errors when a missing symbol
+is actually used are unchanged; unexpected exceptions still propagate.
+
+Apply this increment while retaining the existing Bridge patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C /opt/ascend-training/Megatron-Bridge apply --check "$PWD/patches/megatron-bridge/ascend-optional-import-logging.patch"
+git -C /opt/ascend-training/Megatron-Bridge apply "$PWD/patches/megatron-bridge/ascend-optional-import-logging.patch"
+```
+
+Restart workers to load the patched module. Verification covers INFO/DEBUG
+logging behavior, the unavailable-symbol exception, and propagation of unexpected
+import failures. This changes diagnostics only; it does not supply Apex kernels.
+
+Logging patch SHA-256: `42ffffbd690a9d1915dc7cae7909b294ac8c21702ff6735a6422816d1416240b`.

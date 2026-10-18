@@ -1,0 +1,11 @@
+--- a/src/megatron/bridge/utils/import_utils.py
++++ b/src/megatron/bridge/utils/import_utils.py
+@@ -330,7 +330,7 @@
+         if fallback_module is not None:
+             return safe_import_from(fallback_module, symbol, msg=msg, alt=alt, fallback_module=None)
+         exception_text = traceback.format_exc()
+-        logger.info(f"Import of {symbol} from {module} failed with: {exception_text}")
++        logger.debug(f"Import of {symbol} from {module} failed with: {exception_text}")
+     except Exception:
+         exception_text = traceback.format_exc()
+         raise

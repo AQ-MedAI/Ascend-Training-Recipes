@@ -60,3 +60,35 @@ ascend-lazy-moe-imports.patch SHA-256: `da52b82b941ccb020052aa4f444e4565dbf70492
 
 ascend-gmm-api.patch SHA-256: `4a116eb3080157063fc557f09ab542226da51037ada3c8ea9bc96efbd8e83e6a`.
 
+
+
+## Optional multimodal distributed imports
+
+`ascend-lazy-dist-train.patch` removes eager loading of the four implementation
+modules in `mindspeed.core.multi_modal.dist_train`. MindSpeed's argument validation
+reads `dist_train_config.get_all_config` even when multimodal distributed training
+is disabled. Previously that configuration import also loaded
+`inner_data_parallel`, `dist_parallel_state`, and legacy pipeline schedules.
+The latter implementations require Core APIs removed from the K26 baseline.
+
+This increment keeps the existing package exports available on demand and caches
+successful imports. A configuration-only import does not load communication
+implementations. Errors in explicitly requested implementations still propagate;
+this patch does not implement multimodal distributed training on the K26 Core.
+Do not alias `create_hierarchical_parallel_groups` to `create_hierarchical_groups`:
+their interfaces and return values need an actual adaptation if this feature is
+used in the future.
+
+Apply while retaining the earlier K26 MindSpeed patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-lazy-dist-train.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-lazy-dist-train.patch"
+```
+
+Tests exercise configuration-only imports with the real configuration module,
+legacy package exports, import caching, and error propagation for requested
+optional implementations. Complete NPU training remains to be validated.
+
+Patch SHA-256: `5ee40290217a7c0f92a46938b48dfa9c2177502287624b67f05dda0018065f34`.
