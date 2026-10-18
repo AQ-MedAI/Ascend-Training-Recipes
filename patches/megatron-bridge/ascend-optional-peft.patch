@@ -1,0 +1,35 @@
+--- a/src/megatron/bridge/models/conversion/peft_bridge.py
++++ b/src/megatron/bridge/models/conversion/peft_bridge.py
+@@ -37,8 +37,6 @@
+     get_module_and_param_from_name,
+     persistent_buffers,
+ )
+-from megatron.bridge.peft.canonical_lora import ModuleDict
+-from megatron.bridge.peft.lora import LoRAMerge
+ from megatron.bridge.peft.utils import ParallelLinearAdapter, get_adapter_attributes_from_linear, is_expert_linear
+ 
+ 
+@@ -349,6 +347,7 @@
+         """Get all adapters' information tuple:
+          (global_base_name, local_base_prefix, input_is_parallel, base_linear_is_parallel, alpha, dim, pp_rank, vp_stage)
+         across all pipeline parallel ranks."""
++        from megatron.bridge.peft.canonical_lora import ModuleDict
+         # Cache the result after first call
+         if hasattr(self, "_cached_param_objects_adapter"):
+             return self._cached_param_objects_adapter
+@@ -448,6 +447,7 @@
+         contains the adapter tasks (canonical or regular) that should be
+         merged into that base weight.
+         """
++        from megatron.bridge.peft.canonical_lora import ModuleDict
+ 
+         if not isinstance(megatron_model, list):
+             megatron_model = [megatron_model]
+@@ -829,6 +829,7 @@
+         linear_out_weight: torch.Tensor,
+     ) -> torch.Tensor:
+         """Merge a single adapter's weights with base weight."""
++        from megatron.bridge.peft.lora import LoRAMerge
+ 
+         merger = LoRAMerge()
+         base_device = base_weight.device
