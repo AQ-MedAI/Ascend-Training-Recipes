@@ -1,0 +1,154 @@
+--- /dev/null
++++ b/src/megatron/bridge/models/kimi/kimi_k25_bridge.py
+@@ -0,0 +1,142 @@
++"""Text-only RL conversion for a Kimi conditional-generation checkpoint.
++
++The original checkpoint and rollout remain multimodal; the actor contains only
++its DeepSeek-V3-compatible language model. Vision tensors are never mapped.
++"""
++from copy import copy
++import json
++from pathlib import Path
++from types import SimpleNamespace
++
++from megatron.core.models.gpt.gpt_model import GPTModel
++from megatron.bridge.models.conversion.mapping_registry import MegatronMappingRegistry
++from megatron.bridge.models.conversion.model_bridge import MegatronModelBridge
++from megatron.bridge.models.conversion.param_mapping import AutoMapping
++from megatron.bridge.models.deepseek.common import get_common_mapping_list
++from megatron.bridge.models.deepseek.deepseek_v3_bridge import DeepSeekV3Bridge
++from megatron.bridge.models.mla_provider import MLAModelProvider
++
++
++def _text_config(config):
++    text = getattr(config, 'text_config', None)
++    if text is None or isinstance(text, dict):
++        raise ValueError('Kimi text-only conversion requires a loaded text_config object')
++    required = ('num_hidden_layers', 'hidden_size', 'num_attention_heads',
++                'n_routed_experts', 'moe_intermediate_size', 'first_k_dense_replace',
++                'n_shared_experts', 'kv_lora_rank', 'qk_nope_head_dim',
++                'qk_rope_head_dim', 'v_head_dim')
++    missing = [name for name in required if getattr(text, name, None) is None]
++    if missing:
++        raise ValueError(f'Unsupported Kimi text configuration; missing fields: {missing}')
++    if getattr(text, 'model_type', None) != 'deepseek_v3':
++        raise ValueError('Only the DeepSeek-V3-compatible Kimi text backbone is supported')
++    if getattr(config, 'quantization_config', None) or getattr(text, 'quantization_config', None):
++        raise ValueError('Kimi actor conversion requires an unquantized checkpoint')
++    return text
++
++
++def _checkpoint_keys(config):
++    name = getattr(config, '_name_or_path', None) or getattr(config, 'name_or_path', None)
++    if not name:
++        raise ValueError('Kimi text conversion needs config.name_or_path pointing to the local checkpoint')
++    root = Path(name)
++    index = root / 'model.safetensors.index.json'
++    if index.is_file():
++        return set(json.loads(index.read_text())['weight_map'])
++    single = root / 'model.safetensors'
++    if single.is_file():
++        from safetensors import safe_open
++        with safe_open(single, framework='pt', device='cpu') as tensors:
++            return set(tensors.keys())
++    raise ValueError(f'No local safetensors checkpoint index or single weight file: {root}')
++
++
++def _text_layout(keys):
++    # Match actual tensor names, including older checkpoints without model. in
++    # the language-model prefix. Never infer the prefix from the architecture.
++    roots = ('language_model.model.', 'language_model.',
++             'model.language_model.model.', 'model.language_model.')
++    matches = [root for root in roots if all(root + tail in keys for tail in
++               ('embed_tokens.weight', 'norm.weight', 'layers.0.input_layernorm.weight'))]
++    if len(matches) != 1:
++        raise ValueError(f'Ambiguous or unsupported Kimi language-model tensor prefix: {matches}')
++    root = matches[0]
++    heads = [name for name in ('language_model.lm_head.weight', 'model.language_model.lm_head.weight',
++                              'lm_head.weight') if name in keys]
++    if len(heads) != 1:
++        raise ValueError(f'Expected one separate Kimi LM head, found: {heads}')
++    return root, heads[0]
++
++
++class KimiTextMappingRegistry(MegatronMappingRegistry):
++    """Reject missing actor mappings instead of leaving random initial weights."""
++
++    def __init__(self, keys, *mappings):
++        self.checkpoint_keys = keys
++        super().__init__(*mappings)
++
++    def megatron_to_hf_lookup(self, name):
++        mapping = super().megatron_to_hf_lookup(name)
++        if mapping is None:
++            raise ValueError(f'No Kimi text mapping for actor parameter: {name}')
++        names = [mapping.hf_param] if isinstance(mapping.hf_param, str) else list(mapping.hf_param.values())
++        missing = [key for key in names if key not in self.checkpoint_keys]
++        if missing:
++            raise ValueError(f'Kimi actor mapping references missing checkpoint tensors: {missing}')
++        return mapping
++
++
++@MegatronModelBridge.register_bridge(
++    source='KimiK25ForConditionalGeneration', target=GPTModel,
++    provider=MLAModelProvider, model_type='kimi_k25',
++)
++class KimiK25TextBridge(DeepSeekV3Bridge):
++    """Convert and synchronize only the language model for text-only RL."""
++
++    def provider_bridge(self, hf_pretrained):
++        outer = hf_pretrained.config
++        text = copy(_text_config(outer))
++        # Never mutate the original composite config used by rollout.
++        for name in ('dtype', 'torch_dtype'):
++            if getattr(text, name, None) is None and getattr(outer, name, None) is not None:
++                setattr(text, name, getattr(outer, name))
++        _text_layout(_checkpoint_keys(outer))
++        provider = super().provider_bridge(SimpleNamespace(config=text))
++        provider.seq_length = text.max_position_embeddings
++        return provider
++
++    def mapping_registry(self):
++        _text_config(self.hf_config)
++        keys = _checkpoint_keys(self.hf_config)
++        root, head = _text_layout(keys)
++        mappings = get_common_mapping_list()
++        mappings.append(AutoMapping(
++            megatron_param='decoder.layers.*.mlp.router.expert_bias',
++            hf_param='model.layers.*.mlp.gate.e_score_correction_bias',
++        ))
++
++        def rename(name):
++            if name == 'lm_head.weight':
++                return head
++            if not name.startswith('model.'):
++                raise ValueError(f'Unexpected text mapping: {name}')
++            return root + name[len('model.'):]
++
++        for mapping in mappings:
++            if isinstance(mapping.hf_param, str):
++                mapping.hf_param = rename(mapping.hf_param)
++            else:
++                mapping.hf_param = {key: rename(value) for key, value in mapping.hf_param.items()}
++        return KimiTextMappingRegistry(keys, *mappings)
++
++    def maybe_modify_converted_hf_weight(self, task, converted_weights_dict, hf_state_dict):
++        # Kimi rotary frequencies are reconstructed from text_config, not copied
++        # using the parent bridge's top-level DeepSeek checkpoint names.
++        return converted_weights_dict
++
++    @classmethod
++    def megatron_to_hf_config(cls, provider):
++        raise NotImplementedError(
++            'Standalone Kimi multimodal HF export is unsupported by this text-only bridge; '
++            'retain the original checkpoint for rollout and use distributed training checkpoints'
++        )
+--- a/src/megatron/bridge/models/__init__.py
++++ b/src/megatron/bridge/models/__init__.py
+@@ -353,3 +353,6 @@
+     "SarvamMLABridge",
+     "SarvamMoEBridge",
+ ]
++
++# Register the text-only Kimi conditional-generation bridge.
++from megatron.bridge.models.kimi.kimi_k25_bridge import KimiK25TextBridge
