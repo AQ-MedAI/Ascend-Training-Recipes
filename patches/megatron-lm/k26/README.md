@@ -75,3 +75,43 @@ See [MindSpeed K26 compatibility](../../mindspeed/k26/README.md) for the accompa
 import and grouped-expert adaptations and remaining validation scope.
 
 Routing patch SHA-256: `65653945aac928dc1a7e7ffda9b79f4fc65c6d31d04b62d8ef40d796da156df3`.
+
+
+## Optional TE symbols used as runtime types
+
+`ascend-optional-te-types.patch` guards type checks in Core Attention, MLA,
+shared-expert initialization, and the FP8 linear-classification helpers.
+An importable Transformer Engine shim does not guarantee that `TELinear` or
+other imported names are classes. Calling `isinstance(module, TELinear)` when
+that symbol is `None`, a function, or another placeholder raises TypeError even
+in BF16 initialization.
+
+The patch requires each optional class symbol to be a type before using it as
+`isinstance`'s second argument. It does not disable TE globally, create a dummy
+linear implementation, change NPU projection selection, or suppress genuine
+model-construction errors. Complete TE classes retain the original checks and
+FP8/FP4 input-preservation optimization.
+
+Apply while retaining the previous Core and MindSpeed patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C /opt/ascend-training/Megatron-LM apply --check "$PWD/patches/megatron-lm/k26/ascend-optional-te-types.patch"
+git -C /opt/ascend-training/Megatron-LM apply "$PWD/patches/megatron-lm/k26/ascend-optional-te-types.patch"
+```
+
+Restart workers. Regression checks reproduce the reported failure with the
+unpatched Core Attention constructor and execute the complete initialization
+chain from Core MLASelfAttention through the patched MindSpeed MLA initializer
+into Core Attention. The actual constructor bodies run with lightweight backend
+collaborators rather than substituting the inner Attention constructor. Missing,
+function-valued, and other non-class TE symbols no longer cause TypeError. Other
+checks cover the native MLA projection branch, shared-expert guards, and linear
+classification; complete TE-class behavior is retained.
+
+These are constructor/control-flow checks, not NPU kernel or numerical tests.
+Full BF16 training, optimizer updates, distributed checkpoint recovery, and
+rollout synchronization remain target-container validations. FSDP and optional
+quantized checkpoint integrations are outside this patch's validated scope.
+
+Optional TE types patch SHA-256: `a272e370341b345903de3d2d4cf4a79697a44e8033de17a47f5ecf14615463c6`.
