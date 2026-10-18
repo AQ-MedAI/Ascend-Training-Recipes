@@ -1,0 +1,57 @@
+--- a/src/megatron/bridge/models/conversion/peft_bridge.py
++++ b/src/megatron/bridge/models/conversion/peft_bridge.py
+@@ -347,7 +347,6 @@
+         """Get all adapters' information tuple:
+          (global_base_name, local_base_prefix, input_is_parallel, base_linear_is_parallel, alpha, dim, pp_rank, vp_stage)
+         across all pipeline parallel ranks."""
+-        from megatron.bridge.peft.canonical_lora import ModuleDict
+         # Cache the result after first call
+         if hasattr(self, "_cached_param_objects_adapter"):
+             return self._cached_param_objects_adapter
+@@ -378,6 +377,8 @@
+ 
+                 local_base_prefix = local_param_name.partition(".adapter.")[0]
+                 global_base_name = global_param_name[: -len(".linear_in.weight")]
++                from megatron.bridge.peft.canonical_lora import ModuleDict
++
+                 adapter, to_wrap = self._get_adapter_wrap_module(local_base_prefix, megatron_model, vp_stage)
+                 if isinstance(adapter, ModuleDict):
+                     adapter_name = local_param_name.removeprefix(local_base_prefix + ".adapter.").split(".")[0]
+@@ -447,7 +448,6 @@
+         contains the adapter tasks (canonical or regular) that should be
+         merged into that base weight.
+         """
+-        from megatron.bridge.peft.canonical_lora import ModuleDict
+ 
+         if not isinstance(megatron_model, list):
+             megatron_model = [megatron_model]
+@@ -501,6 +501,8 @@
+             linear_in_module, linear_in_weight = None, None
+             linear_out_module, linear_out_weight = None, None
+             if parallel_state.get_pipeline_model_parallel_rank() == pp_rank:
++                from megatron.bridge.peft.canonical_lora import ModuleDict
++
+                 adapter, _ = self._get_adapter_wrap_module(local_base_prefix, megatron_model, vp_stage)
+                 if isinstance(adapter, ModuleDict):
+                     adapter = adapter[adapter_key]
+--- a/src/megatron/bridge/peft/lora_layers.py
++++ b/src/megatron/bridge/peft/lora_layers.py
+@@ -11,6 +11,8 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++
++from __future__ import annotations
+ 
+ import math
+ from typing import Any, Literal, Optional, Tuple, Union
+@@ -232,6 +234,9 @@
+     """LoRA adapter wrapper using Transformer Engine operation fuser"""
+ 
+     def __init__(self, to_wrap: nn.Module, adapter: nn.Module):
++        if not callable(getattr(getattr(te, 'ops', None), 'Sequential', None)):
++            raise RuntimeError('TE-fused LoRA requires Transformer Engine ops; '
++                               'the current Ascend compatibility backend does not provide them')
+         super().__init__(to_wrap, adapter)
+         self._fused_branches: Optional[tuple[te.ops.Sequential, te.ops.Sequential]] = None
+ 

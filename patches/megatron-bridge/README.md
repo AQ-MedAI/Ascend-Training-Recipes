@@ -124,3 +124,37 @@ tensor under the original HF name. Distributed scatter/gather is simulated;
 HCCL/NPU communication and full rollout synchronization still need validation.
 
 AutoMapping sharding patch SHA-256: `180a9bd2ec330ad61247dee7f915b61b9ef55e15628b1159a7fee1f94ebf5866`.
+
+
+## Non-PEFT export scans and optional TE operation annotations
+
+`ascend-optional-peft-scan.patch` extends `ascend-optional-peft.patch`; apply it
+**after** that earlier patch. A normal weight export can call adapter-task
+collection even when no adapters exist. Importing CanonicalLoRA's `ModuleDict`
+at the start of those methods still imported all LoRA implementations.
+
+The new increment imports `ModuleDict` only inside branches handling an actual
+adapter. Non-PEFT scans keep their original PP collectives, ordering, and cache;
+no rank skips a collective merely because its local model has no adapters.
+
+It also postpones annotation evaluation in `lora_layers.py`, so defining
+`TEFusedLoRALinear` does not access absent `te.ops.Sequential` merely to construct
+a type hint. Explicitly constructing a fused LoRA wrapper without TE ops raises
+a capability error. No fake `te.ops` implementation is installed, and this does
+not add Ascend fused-LoRA support.
+
+Apply this increment while retaining previous Bridge patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C /opt/ascend-training/Megatron-Bridge apply --check "$PWD/patches/megatron-bridge/ascend-optional-peft-scan.patch"
+git -C /opt/ascend-training/Megatron-Bridge apply "$PWD/patches/megatron-bridge/ascend-optional-peft-scan.patch"
+```
+
+Restart workers. Regression checks execute the actual adapter scan/task methods
+while forbidding LoRA imports, verify that the empty scan still performs its
+collective and caches the result, execute LoRA class definitions with a TE shim
+lacking ops, and check explicit fused-LoRA rejection. Backend communication and
+fused kernels are not exercised by these CPU checks.
+
+Optional PEFT scan patch SHA-256: `ee5cb32a243cfa0d1927890d1aa3308d7744b4d73f4af40947ec062f0882ea75`.
