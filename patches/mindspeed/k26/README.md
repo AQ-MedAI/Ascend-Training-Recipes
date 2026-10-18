@@ -160,7 +160,7 @@ git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-te-model-c
 ```
 
 The updated K26 `runtime_env.sh` runs `tools/check_k26_runtime_contracts.py`
-before Ray starts. It checks seven loaded interfaces and reports the actual source
+before Ray starts. It checks eight loaded interfaces and reports the actual source
 file if an old adapter is still selected. This is an early interface check, not
 a model construction or numerical test; feature repatching inside workers still
 requires the distributed smoke test.
@@ -180,3 +180,44 @@ and checkpoint save/resume remain target-container checks. No local NPU runtime
 was available for this review.
 
 TE model patch SHA-256: `b722d959f963d189f6421e38863e7f8dfda159556c30bf84a73571440b92bd6e`.
+
+
+## AdamW registered through Apex's FusedAdam interface
+
+`ascend-adamw-api.patch` adds the `adam_w_mode` keyword to both MindSpeed AdamW
+implementations registered as `apex.optimizers.FusedAdam`. K26 Core identifies
+the Apex route and passes `adam_w_mode=config.decoupled_weight_decay`; the
+previous MindSpeed signatures rejected this keyword before creating an optimizer.
+
+`adam_w_mode=True` selects the existing AdamW implementation unchanged.
+`adam_w_mode=False` raises explicitly because these implementations do not supply
+coupled Adam weight decay. Unknown options still raise; unsupported parameters
+are not silently discarded. The current K26 recipe uses AdamW semantics.
+
+Apply while retaining earlier MindSpeed patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-adamw-api.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-adamw-api.patch"
+```
+
+The updated runtime checker also checks that the optimizer actually selected by
+Core accepts the Apex keyword before Ray starts. Restart the driver and workers.
+
+Regression checks execute Core's Adam factory branch, including its eager moment
+initialization, and the real default MindSpeed AdamW step and fused arithmetic
+on CPU (only NPU placement of the step scalar is replaced). Five updates, with
+save/restore after the second update, match Torch AdamW parameters and moments.
+Additional checks execute MindSpeed chained-step control flow, validate clipping
+call keywords against Core, and execute Core DistributedOptimizer's step-metadata
+extraction for the default Apex-compatible optimizer.
+
+This validates the current default `fused_adamw` route. Both constructor signatures
+are tested, but `fused_torch_adamw`'s per-parameter step state is not validated as
+an alternative distributed checkpoint path. Precision-aware optimizer extensions,
+coupled Adam, CPU offload, and complete distributed checkpoint reconstruction are
+outside this patch's tested scope. NPU kernels and distributed optimizer steps
+still require the target-container smoke test.
+
+AdamW API patch SHA-256: `5ee3553ce9420bc4e6e7f716777c68bb29f384bcd70344387eea0a732de7db55`.

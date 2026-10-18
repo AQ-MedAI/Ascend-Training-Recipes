@@ -37,6 +37,6 @@ checker_path = recipe_root / 'tools/check_k26_runtime_contracts.py'
 spec = importlib.util.spec_from_file_location('k26_runtime_contracts', checker_path)
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
-print(f'K26 BF16 model interfaces: {checker.check_runtime_contracts()} checks passed', flush=True)
+print(f'K26 BF16 runtime interfaces: {checker.check_runtime_contracts()} checks passed', flush=True)
 print(f'K26 training Python: {sys.executable}', flush=True)
 CHECK

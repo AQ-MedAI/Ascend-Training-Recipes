@@ -7,6 +7,7 @@ import inspect
 
 def check_runtime_contracts():
     # The caller must initialize MindSpeed before importing Core, as runtime_env.sh does.
+    from megatron.core import optimizer as optimizer_module
     from megatron.core.extensions import transformer_engine as te
     from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
     from megatron.core.tensor_parallel.layers import ColumnParallelLinear
@@ -34,16 +35,20 @@ def check_runtime_contracts():
             failures.append(f"{label}: missing {sorted(missing)} ({inspect.getfile(function)})")
     if TESpecProvider().linear() is not ColumnParallelLinear:
         failures.append("TESpecProvider.linear: BF16 MLA still selects a TE Linear shim")
+    if not optimizer_module.USING_PYTORCH_OPTIMIZER:
+        constructor = optimizer_module.Adam
+        if "adam_w_mode" not in inspect.signature(constructor).parameters:
+            failures.append(f"Adam optimizer: missing adam_w_mode ({inspect.getfile(constructor)})")
     if failures:
         raise RuntimeError(
             "K26 BF16 model interface mismatch:\n"
             + "\n".join(failures)
             + "\nApply patches/mindspeed/k26/ascend-te-model-contracts.patch and restart workers."
         )
-    return len(targets) + 1
+    return len(targets) + 2
 
 
 if __name__ == "__main__":
     import mindspeed.megatron_adaptor  # noqa: F401
 
-    print(f"K26 BF16 model interfaces: {check_runtime_contracts()} checks passed")
+    print(f"K26 BF16 runtime interfaces: {check_runtime_contracts()} checks passed")

@@ -215,12 +215,21 @@ class TeContractsTest(unittest.TestCase):
             TERowParallelGroupedLinear=SimpleNamespace(__init__=attention))
         block = SimpleNamespace(forward=forward, _checkpointed_forward=checkpoint)
         column = object()
+        def adam(params, adam_w_mode=True):
+            pass
         ns = dict(inspect=inspect, te=te, TransformerBlock=block, ColumnParallelLinear=column,
+                  optimizer_module=SimpleNamespace(USING_PYTORCH_OPTIMIZER=False, Adam=adam),
                   TESpecProvider=lambda: SimpleNamespace(linear=lambda: column))
         exec(compile(ast.Module(body=[fn], type_ignores=[]), '<actual startup checker>', 'exec'), ns)
-        self.assertEqual(ns['check_runtime_contracts'](), 7)
+        self.assertEqual(ns['check_runtime_contracts'](), 8)
         def old(self, **kwargs):
             pass
+        def old_adam(params):
+            pass
+        ns['optimizer_module'].Adam = old_adam
+        with self.assertRaisesRegex(RuntimeError, 'Adam optimizer: missing adam_w_mode'):
+            ns['check_runtime_contracts']()
+        ns['optimizer_module'].Adam = adam
         te.TEDotProductAttention.__init__ = old
         with self.assertRaisesRegex(RuntimeError, 'TEDotProductAttention.*pg_collection'):
             ns['check_runtime_contracts']()

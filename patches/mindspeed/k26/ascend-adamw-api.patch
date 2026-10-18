@@ -1,0 +1,26 @@
+--- a/mindspeed/core/optimizer/adamw.py
++++ b/mindspeed/core/optimizer/adamw.py
+@@ -77,7 +77,10 @@
+         capturable: bool = False,
+         differentiable: bool = False,
+         fused: Optional[bool] = None,
++        adam_w_mode: bool = True,
+     ):
++        if not adam_w_mode:
++            raise ValueError('MindSpeed AdamW requires adam_w_mode=True (decoupled weight decay)')
+         super().__init__(
+             params,
+             lr=lr,
+@@ -95,8 +98,11 @@
+ 
+ class AdamW(Optimizer):
+     def __init__(
+-        self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, *, maximize: bool = False
++        self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2, amsgrad=False, *,
++        maximize: bool = False, adam_w_mode: bool = True
+     ):
++        if not adam_w_mode:
++            raise ValueError('MindSpeed AdamW requires adam_w_mode=True (decoupled weight decay)')
+         if 0.0 > lr:
+             raise ValueError("Invalid learning rate: {}".format(lr))
+         if 0.0 > eps:
