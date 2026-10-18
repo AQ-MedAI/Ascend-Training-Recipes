@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from patched_sources import is_prepared, load_source
+from prepare_framework_sources import source_commit
 from prepare_image_sources import image_sources
 
 
@@ -30,7 +31,7 @@ def main():
     for name, component in registry["components"].items():
         checkout = Path(os.environ.get(source_vars[name], str(source_root / name)))
         expected = component["profiles"][args.profile]["commit"]
-        actual = subprocess.check_output(["git", "-C", str(checkout), "rev-parse", "HEAD"], text=True).strip()
+        actual = source_commit(checkout)
         if actual != expected:
             raise SystemExit(
                 f"{name}: expected {expected}, found {actual};"

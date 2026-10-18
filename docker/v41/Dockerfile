@@ -4,15 +4,17 @@
 ARG BASE_IMAGE=swr.cn-south-1.myhuaweicloud.com/ascendhub/cann:9.1.0-a3-ubuntu22.04-py3.12
 FROM ${BASE_IMAGE} AS common
 ARG BASE_IMAGE
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG UV_INDEX_URL=${PIP_INDEX_URL}
 USER root
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV BASH_ENV=/dev/null \
     DEBIAN_FRONTEND=noninteractive \
     PIP_CONFIG_FILE=/dev/null \
-    PIP_INDEX_URL=https://pypi.org/simple \
+    PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_EXTRA_INDEX_URL="" \
     PIP_CONSTRAINT="" \
-    UV_INDEX_URL=https://pypi.org/simple \
+    UV_INDEX_URL=${UV_INDEX_URL} \
     UV_EXTRA_INDEX_URL="" \
     UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy \
@@ -47,6 +49,10 @@ ARG SOC_VERSION=ascend910_9382
 ARG MAX_JOBS=4
 ARG DEPENDENCY_OFFLINE=0
 ARG PYTHON_DEPENDENCY_MODE=resolve
+# Use GitHub's public snapshot endpoint for all seven pinned framework sources.
+ARG FRAMEWORK_SOURCE_TRANSPORT=archive
+# Optional per-repository override; empty inherits FRAMEWORK_SOURCE_TRANSPORT.
+ARG MEGATRON_SOURCE_TRANSPORT=
 ENV DEPENDENCY_ROOT=/opt/ascend-training \
     MEGATRON_ROOT=/opt/ascend-training/third_party/Megatron-LM \
     SOC_VERSION=${SOC_VERSION}
@@ -55,7 +61,9 @@ COPY dependencies/ /tmp/ascend-image-build/dependencies/
 COPY patches/ /tmp/ascend-image-build/patches/
 COPY tools/prepare_framework_sources.py tools/prepare_image_sources.py /tmp/ascend-image-build/tools/
 COPY docker/v41/Megatron-LM-LICENSE /tmp/ascend-image-build/
-RUN python3 /tmp/ascend-image-build/tools/prepare_image_sources.py \
+RUN FRAMEWORK_SOURCE_TRANSPORT="${FRAMEWORK_SOURCE_TRANSPORT}" \
+    MEGATRON_SOURCE_TRANSPORT="${MEGATRON_SOURCE_TRANSPORT}" \
+    python3 /tmp/ascend-image-build/tools/prepare_image_sources.py \
     --root /opt/ascend-training/third_party --inputs /tmp/ascend-image-build
 
 # A complete runtime lock is optional for development builds; fixed inputs are included.

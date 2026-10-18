@@ -4,7 +4,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
+import tarfile
+import tempfile
 import time
 from pathlib import Path
 
@@ -105,6 +109,81 @@ def fetch_commit(target, commit):
             time.sleep(delay)
 
 
+def source_commit(target):
+    """Return the upstream pin for a verified archive baseline or a Git checkout."""
+
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(target), *args], text=True).strip()
+
+    head = git("rev-parse", "HEAD")
+    baseline = subprocess.run(
+        ["git", "-C", str(target), "config", "--get", "ascend.archiveHead"], capture_output=True, text=True
+    )
+    if baseline.returncode == 0 and baseline.stdout.strip() == head:
+        return git("config", "--get", "ascend.upstreamCommit")
+    return head
+
+
+def fetch_archive(target, source):
+    """Download the pinned public snapshot; final inventory verification is mandatory."""
+    commit = source["commit"]
+    repository = re.fullmatch(r"https://github.com/([\w.-]+)/([\w.-]+?)(?:\.git)?/?", source["repository"])
+    if repository is None or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("Archive transport requires a public GitHub repository and a full commit")
+    owner, name = repository.groups()
+    url = f"https://codeload.github.com/{owner}/{name}/tar.gz/{commit}"
+    print(f"Downloading {target.name} @ {commit} from {url}", flush=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = Path(tmp) / "source.tar.gz"
+        subprocess.check_call(
+            [
+                "curl",
+                "--fail",
+                "--location",
+                "--show-error",
+                "--http1.1",
+                "--connect-timeout",
+                "20",
+                "--max-time",
+                "600",
+                "--retry",
+                "3",
+                "--retry-all-errors",
+                "--retry-delay",
+                "5",
+                "--output",
+                str(archive),
+                url,
+            ]
+        )
+        prefix = f"{name}-{commit}"
+        symlinks = []
+        with tarfile.open(archive, "r:gz") as bundle:
+            for member in bundle:
+                parts = member.name.split("/")
+                if parts[0] != prefix or any(p in ("..", ".git") for p in parts):
+                    raise RuntimeError(f"Unexpected archive path: {member.name}")
+                destination = target.joinpath(*parts[1:])
+                if member.isdir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                elif member.isfile():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with bundle.extractfile(member) as src, destination.open("xb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    destination.chmod(0o755 if member.mode & 0o111 else 0o644)
+                elif member.issym():
+                    link = Path(member.linkname)
+                    if link.is_absolute() or not (destination.parent / link).resolve().is_relative_to(target.resolve()):
+                        raise RuntimeError(f"Unsafe archive symlink: {member.name}")
+                    symlinks.append((destination, member.linkname))
+                else:
+                    raise RuntimeError(f"Unsupported archive entry: {member.name}")
+        # Create links last so extraction never writes through an archive symlink.
+        for destination, link in symlinks:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.symlink_to(link)
+
+
 def prepare(root, manifest_path, profile=None):
     manifest = json.loads(manifest_path.read_text())
     for name, source in manifest_sources(manifest, profile).items():
@@ -124,10 +203,37 @@ def prepare(root, manifest_path, profile=None):
 
         git("init", "-q")
         git("remote", "add", "origin", source["repository"])
-        fetch_commit(target, source["commit"])
-        git("checkout", "--detach", "FETCH_HEAD")
-        if git("rev-parse", "HEAD").strip() != source["commit"]:
-            raise RuntimeError(f"Unexpected base commit: {name}")
+        transport = os.environ.get("FRAMEWORK_SOURCE_TRANSPORT", "git")
+        if name == "Megatron-LM":
+            transport = os.environ.get("MEGATRON_SOURCE_TRANSPORT") or transport
+        if transport == "archive":
+            fetch_archive(target, source)
+            # Keep a real local baseline/index for editable installs, SCM versioning,
+            # patch inspection and nested gitlink verification; do not fake upstream HEAD.
+            git("add", "--all", "--force")
+            for link, commit in source.get("gitlinks", {}).items():
+                (target / link).mkdir(parents=True, exist_ok=True)
+                git("update-index", "--add", "--cacheinfo", f"160000,{commit},{link}")
+            git(
+                "-c",
+                "user.name=Source Archive",
+                "-c",
+                "user.email=archive@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-qm",
+                f"Archive of {source['commit']}",
+            )
+            git("config", "ascend.archiveHead", git("rev-parse", "HEAD").strip())
+            git("config", "ascend.upstreamCommit", source["commit"])
+        elif transport == "git":
+            fetch_commit(target, source["commit"])
+            git("checkout", "--detach", "FETCH_HEAD")
+            if git("rev-parse", "HEAD").strip() != source["commit"]:
+                raise RuntimeError(f"Unexpected base commit: {name}")
+        else:
+            raise ValueError(f"Unknown framework source transport: {transport}")
         if "patches" in source:
             reference = {"files": source["reference_files"]}
             if "gitlinks" in source:

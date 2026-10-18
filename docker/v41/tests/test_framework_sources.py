@@ -1,11 +1,13 @@
 """Check that source verification rejects incomplete or modified checkouts."""
 
 import hashlib
+import io
 import json
 import subprocess
 import importlib.util
 from pathlib import Path
 import tempfile
+import tarfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
@@ -155,6 +157,112 @@ class FetchRetryTest(unittest.TestCase):
                     module.fetch_commit(Path("/tmp/source"), "abc123")
         self.assertEqual(call.call_count, 3)
         self.assertEqual([c.args[0] for c in sleep.call_args_list], [5, 10])
+
+
+class ArchiveSourceTest(unittest.TestCase):
+    def test_generic_archive_preserves_gitlinks_symlinks_and_upstream_pin(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "b" * 40
+            (root / "empty.patch").write_bytes(b"")
+            files = {
+                "model.py": {"sha256": hashlib.sha256(b"base\n").hexdigest(), "executable": False},
+                "alias.py": {"kind": "symlink", "target": "model.py"},
+            }
+            source = {
+                "repository": "https://github.com/verl-project/verl.git",
+                "commit": commit, "gitlinks": {"recipe": "c" * 40},
+                "patches": [{"path": "empty.patch", "sha256": hashlib.sha256(b"").hexdigest()}],
+                "reference_files": files, "files": files,
+            }
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"sources": {"verl": source}}))
+
+            def download(command):
+                self.assertEqual(command[-1], f"https://codeload.github.com/verl-project/verl/tar.gz/{commit}")
+                with tarfile.open(command[command.index("--output") + 1], "w:gz") as bundle:
+                    member = tarfile.TarInfo(f"verl-{commit}/model.py")
+                    member.size = 5
+                    bundle.addfile(member, io.BytesIO(b"base\n"))
+                    member = tarfile.TarInfo(f"verl-{commit}/alias.py")
+                    member.type = tarfile.SYMTYPE
+                    member.linkname = "model.py"
+                    bundle.addfile(member)
+
+            with patch.dict(module.os.environ, {"FRAMEWORK_SOURCE_TRANSPORT": "archive"}):
+                with patch.object(module.subprocess, "check_call", side_effect=download):
+                    module.prepare(root / "output", manifest)
+            checkout = root / "output/verl"
+            module.verify(checkout, source, tracked=True)
+            self.assertEqual(module.source_commit(checkout), commit)
+            self.assertEqual((checkout / "alias.py").read_bytes(), b"base\n")
+            staged = subprocess.check_output(["git", "-C", str(checkout), "ls-files", "--stage"], text=True)
+            self.assertIn("160000 " + "c" * 40, staged)
+            (checkout / "model.py").write_bytes(b"tampered\n")
+            with self.assertRaisesRegex(RuntimeError, "checksum or mode"):
+                module.verify(checkout, source, tracked=True)
+
+    def test_archive_prepare_applies_patch_and_rejects_modified_source(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            commit = "a" * 40
+            patch_text = "diff --git a/model.py b/model.py\n--- a/model.py\n+++ b/model.py\n@@ -1 +1 @@\n-base\n+patched\n"
+            (root / "local.patch").write_text(patch_text)
+            source = {
+                "repository": "https://github.com/NVIDIA/Megatron-LM.git",
+                "commit": commit,
+                "patch": "local.patch",
+                "patch_sha256": hashlib.sha256(patch_text.encode()).hexdigest(),
+                "files": {"model.py": {
+                    "sha256": hashlib.sha256(b"patched\n").hexdigest(),
+                    "executable": True,
+                }},
+            }
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({"sources": {"Megatron-LM": source}}))
+
+            def download(command):
+                archive = command[command.index("--output") + 1]
+                self.assertEqual(command[-1], f"https://codeload.github.com/NVIDIA/Megatron-LM/tar.gz/{commit}")
+                with tarfile.open(archive, "w:gz") as bundle:
+                    member = tarfile.TarInfo(f"Megatron-LM-{commit}/model.py")
+                    member.size = len(b"base\n")
+                    member.mode = 0o755
+                    bundle.addfile(member, io.BytesIO(b"base\n"))
+
+            with patch.dict(module.os.environ, {"MEGATRON_SOURCE_TRANSPORT": "archive"}):
+                with patch.object(module.subprocess, "check_call", side_effect=download):
+                    module.prepare(root / "good", manifest)
+                    self.assertEqual((root / "good/Megatron-LM/model.py").read_bytes(), b"patched\n")
+                    source["files"]["model.py"]["sha256"] = "0" * 64
+                    manifest.write_text(json.dumps({"sources": {"Megatron-LM": source}}))
+                    with self.assertRaisesRegex(RuntimeError, "checksum or mode"):
+                        module.prepare(root / "bad", manifest)
+
+    def test_archive_rejects_path_traversal(self):
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "checkout"
+            target.mkdir()
+            commit = "a" * 40
+
+            def download(command):
+                with tarfile.open(command[command.index("--output") + 1], "w:gz") as bundle:
+                    member = tarfile.TarInfo(f"Megatron-LM-{commit}/../escaped")
+                    bundle.addfile(member, io.BytesIO(b""))
+
+            with patch.object(module.subprocess, "check_call", side_effect=download):
+                with self.assertRaisesRegex(RuntimeError, "Unexpected archive path"):
+                    module.fetch_archive(target, {
+                        "repository": "https://github.com/NVIDIA/Megatron-LM.git", "commit": commit,
+                    })
+            self.assertFalse((root / "escaped").exists())
 
 
 if __name__ == "__main__":

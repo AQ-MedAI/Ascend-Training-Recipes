@@ -1,0 +1,332 @@
+--- a/mindspeed/te/pytorch/attention/dot_product_attention/dot_product_attention.py
++++ b/mindspeed/te/pytorch/attention/dot_product_attention/dot_product_attention.py
+@@ -550,6 +550,7 @@
+         k_channels: Optional[int] = None,
+         v_channels: Optional[int] = None,
+         cp_comm_type: str = "p2p",
++        pg_collection=None,
+     ):
+         self.config = config
+         self.layer_number = max(1, layer_number)
+@@ -557,14 +558,22 @@
+         self.attention_type = attention_type  # unused for now
+         self.qkv_format: str = 'sbhd'
+ 
++        self.pg_collection = pg_collection
++        tp_group = (pg_collection.tp if pg_collection is not None
++                    else get_tensor_model_parallel_group(check_initialized=False))
++        tp_size = tp_group.size() if tp_group is not None else self.config.tensor_model_parallel_size
+         extra_kwargs: dict[str, Any] = {}
+         extra_kwargs["num_gqa_groups"] = self.config.num_query_groups
+         extra_kwargs["attention_type"] = attention_type
+ 
+         # This check is important as CP config can be disabled while having a valid CP group
+         if self.config.context_parallel_size > 1:
+-            extra_kwargs["cp_group"] = get_context_parallel_group(check_initialized=False)
+-            extra_kwargs["cp_global_ranks"] = get_context_parallel_global_ranks(check_initialized=False)
++            if pg_collection is None:
++                extra_kwargs["cp_group"] = get_context_parallel_group(check_initialized=False)
++                extra_kwargs["cp_global_ranks"] = get_context_parallel_global_ranks(check_initialized=False)
++            else:
++                extra_kwargs["cp_group"] = pg_collection.cp
++                extra_kwargs["cp_global_ranks"] = torch.distributed.get_process_group_ranks(pg_collection.cp)
+             # Read context_parallel_algo from global args (always up-to-date after repatch)
+             # rather than from self.config (which may be a stale snapshot from before repatch).
+             extra_kwargs["cp_comm_type"] = get_full_args().context_parallel_algo
+@@ -584,7 +593,10 @@
+ 
+         extra_kwargs['softmax_scale'] = softmax_scale
+ 
+-        self.kept_packed_seq_params = set(field.name for field in dataclasses.fields(PackedSeqParams))
++        self.kept_packed_seq_params = {
++            field.name for field in dataclasses.fields(PackedSeqParams)
++            if field.name not in {'local_cp_size', 'cp_group'}
++        }
+ 
+         super().__init__(
+             num_attention_heads=self.config.num_attention_heads,
+@@ -592,8 +604,8 @@
+             attention_dropout=(self.config.attention_dropout if attention_dropout is None else attention_dropout),
+             attn_mask_type=self.attn_mask_type,
+             sequence_parallel=self.config.sequence_parallel,
+-            tp_size=self.config.tensor_model_parallel_size,
+-            tp_group=get_tensor_model_parallel_group(check_initialized=False),
++            tp_size=tp_size,
++            tp_group=tp_group,
+             layer_number=self.layer_number,
+             **extra_kwargs,
+         )
+@@ -616,6 +628,16 @@
+             self.config.sparse_mode = 2
+             attention_mask = get_attention_mask(self.config)
+ 
++        if packed_seq_params is not None:
++            packed_cp = getattr(packed_seq_params, 'cp_group', None)
++            packed_cp_size = getattr(packed_seq_params, 'local_cp_size', None)
++            configured_cp = self.pg_collection.cp if self.pg_collection is not None else self.cp_group
++            if packed_cp is not None and packed_cp is not configured_cp:
++                raise NotImplementedError('Dynamic packed CP groups require a separate attention adaptation')
++            configured_cp_size = configured_cp.size() if configured_cp is not None else 1
++            if packed_cp_size is not None and packed_cp_size != configured_cp_size:
++                raise NotImplementedError('Dynamic packed local_cp_size is unsupported by MindSpeed attention')
++
+         packed_seq_kwargs = (
+             {key: getattr(packed_seq_params, key) for key in self.kept_packed_seq_params}
+             if packed_seq_params is not None
+--- a/mindspeed/te/pytorch/module/layernorm_column_parallel_linear.py
++++ b/mindspeed/te/pytorch/module/layernorm_column_parallel_linear.py
+@@ -72,6 +72,8 @@
+         is_expert: bool = False,
+         skip_weight_param_allocation: bool = False,
+         tp_comm_buffer_name: Optional[str] = None,
++        tp_group=None,
++        stride: int = 1,
+     ):
+         super().__init__()
+         self.config = config
+@@ -99,7 +101,11 @@
+             raise ValueError('Transformer Engine linear layers do not support skip_weight_param_allocation')
+ 
+         # ColumnParallelLine init spec.
+-        if is_expert:
++        if tp_group is not None:
++            self.parallel_group = tp_group
++            tp_size = tp_group.size()
++            rank = tp_group.rank()
++        elif is_expert:
+             # Not should be used for now.
+             tp_size = get_expert_tensor_parallel_world_size()
+             rank = get_expert_tensor_parallel_rank()
+@@ -153,7 +159,7 @@
+                     self.output_size_per_partition,
+                     0,
+                     init_method,
+-                    stride=1,
++                    stride=stride,
+                     rank=rank,
+                     world_size=tp_size,
+                 )
+@@ -171,7 +177,7 @@
+                     self.weight,
+                     init_method,
+                     partition_dim=0,
+-                    stride=1,
++                    stride=stride,
+                     is_expert=self.is_expert,
+                 )
+ 
+@@ -188,8 +194,8 @@
+                         dtype=config.params_dtype,
+                     )
+                 )
+-            # stride=1 in this case.
+-            set_tensor_model_parallel_attributes(self.bias, True, 0, 1)
++            # Match the weight partition stride.
++            set_tensor_model_parallel_attributes(self.bias, True, 0, stride)
+             if config.perform_initialization:
+                 # Always initialize bias to zero.
+                 with torch.no_grad():
+@@ -244,7 +250,7 @@
+         if self.allreduce_dgrad or self.sequence_parallel:
+             input_parallel = norm_output
+         else:
+-            input_parallel = copy_to_tensor_model_parallel_region(norm_output)
++            input_parallel = copy_to_tensor_model_parallel_region(norm_output, group=self.parallel_group)
+ 
+         if self.config.fp8:
+             from mindspeed.te.pytorch.module.linear import ColumnParallelSeq, ColumnParallelNoSeq
+@@ -269,6 +275,7 @@
+                 gradient_accumulation_fusion=self.gradient_accumulation_fusion,
+                 allreduce_dgrad=self.allreduce_dgrad,
+                 sequence_parallel=self.sequence_parallel,
++                tp_group=self.parallel_group,
+                 grad_output_buffer=(self.grad_output_buffer if self.config.defer_embedding_wgrad_compute else None),
+                 wgrad_deferral_limit=(
+                     self.config.wgrad_deferral_limit if self.config.defer_embedding_wgrad_compute else None
+@@ -284,4 +291,4 @@
+         from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
+ 
+         state_dict = self.state_dict(prefix='', keep_vars=True)
+-        return make_sharded_tensors_for_checkpoint(state_dict, prefix, {'weight': 0, 'bias': 0}, sharded_offsets)
++        return make_sharded_tensors_for_checkpoint(state_dict, prefix, {'weight': 0, 'bias': 0}, sharded_offsets, tp_group=self.parallel_group)
+--- a/mindspeed/te/pytorch/module/grouped_linear.py
++++ b/mindspeed/te/pytorch/module/grouped_linear.py
+@@ -154,6 +154,8 @@
+         skip_bias_add: bool,
+         is_expert: bool = False,
+         tp_comm_buffer_name: Optional[str] = None,
++        pg_collection=None,
++        tp_group=None,
+         **kwargs,
+     ):
+         super().__init__()
+@@ -167,7 +169,14 @@
+         self.partition_dim = _get_partition_dim(parallel_mode)
+         self.parallel_mode = parallel_mode
+ 
+-        if is_expert:
++        if pg_collection is not None:
++            selected_group = pg_collection.expt_tp if is_expert else pg_collection.tp
++            if tp_group is not None and tp_group is not selected_group:
++                raise ValueError('Conflicting tp_group and pg_collection for grouped linear')
++            tp_group = selected_group
++        if tp_group is not None:
++            tp_size = tp_group.size()
++        elif is_expert:
+             tp_group = get_expert_tensor_parallel_group(check_initialized=False)
+             tp_size = get_expert_tensor_parallel_world_size()
+         else:
+@@ -333,6 +342,8 @@
+         skip_bias_add: bool,
+         is_expert: bool,
+         tp_comm_buffer_name: Optional[str] = None,
++        pg_collection=None,
++        tp_group=None,
+     ):
+         super().__init__(
+             num_gemms=num_gemms,
+@@ -345,6 +356,8 @@
+             skip_bias_add=skip_bias_add,
+             is_expert=is_expert,
+             tp_comm_buffer_name=tp_comm_buffer_name,
++            pg_collection=pg_collection,
++            tp_group=tp_group,
+         )
+ 
+     def sharded_state_dict(self, prefix='', sharded_offsets=(), metadata=None):
+@@ -376,6 +389,8 @@
+         skip_bias_add: bool,
+         is_expert: bool,
+         tp_comm_buffer_name: Optional[str] = None,
++        pg_collection=None,
++        tp_group=None,
+     ):
+         super().__init__(
+             num_gemms=num_gemms,
+@@ -388,6 +403,8 @@
+             skip_bias_add=skip_bias_add,
+             is_expert=is_expert,
+             tp_comm_buffer_name=tp_comm_buffer_name,
++            pg_collection=pg_collection,
++            tp_group=tp_group,
+         )
+ 
+     def sharded_state_dict(self, prefix='', sharded_offsets=(), metadata=None):
+--- a/mindspeed/te/pytorch/module/performance_grouped_linear.py
++++ b/mindspeed/te/pytorch/module/performance_grouped_linear.py
+@@ -54,6 +54,8 @@
+         skip_bias_add: bool,
+         is_expert: bool = False,
+         tp_comm_buffer_name: Optional[str] = None,
++        pg_collection=None,
++        tp_group=None,
+         **kwargs,
+     ):
+         super().__init__()
+@@ -67,7 +69,14 @@
+         self.partition_dim = _get_partition_dim(parallel_mode)
+         self.parallel_mode = parallel_mode
+ 
+-        if is_expert:
++        if pg_collection is not None:
++            selected_group = pg_collection.expt_tp if is_expert else pg_collection.tp
++            if tp_group is not None and tp_group is not selected_group:
++                raise ValueError('Conflicting tp_group and pg_collection for grouped linear')
++            tp_group = selected_group
++        if tp_group is not None:
++            tp_size = tp_group.size()
++        elif is_expert:
+             tp_group = get_expert_tensor_parallel_group(check_initialized=False)
+             tp_size = get_expert_tensor_parallel_world_size()
+         else:
+@@ -222,6 +231,8 @@
+         skip_bias_add: bool,
+         is_expert: bool,
+         tp_comm_buffer_name: Optional[str] = None,
++        pg_collection=None,
++        tp_group=None,
+     ):
+         super().__init__(
+             num_gemms=num_gemms,
+@@ -234,6 +245,8 @@
+             skip_bias_add=skip_bias_add,
+             is_expert=is_expert,
+             tp_comm_buffer_name=tp_comm_buffer_name,
++            pg_collection=pg_collection,
++            tp_group=tp_group,
+         )
+ 
+     def sharded_state_dict(self, prefix='', sharded_offsets=(), metadata=None):
+@@ -265,6 +278,8 @@
+         skip_bias_add: bool,
+         is_expert: bool,
+         tp_comm_buffer_name: Optional[str] = None,
++        pg_collection=None,
++        tp_group=None,
+     ):
+         super().__init__(
+             num_gemms=num_gemms,
+@@ -277,6 +292,8 @@
+             skip_bias_add=skip_bias_add,
+             is_expert=is_expert,
+             tp_comm_buffer_name=tp_comm_buffer_name,
++            pg_collection=pg_collection,
++            tp_group=tp_group,
+         )
+ 
+     def sharded_state_dict(self, prefix='', sharded_offsets=(), metadata=None):
+--- a/mindspeed/features_manager/megatron_basic/transformer_engine_basic.py
++++ b/mindspeed/features_manager/megatron_basic/transformer_engine_basic.py
+@@ -36,6 +36,13 @@
+             "megatron.core.optimizer.distrib_optimizer.DistributedOptimizer.step_with_ready_grads",
+             optimizer_step_reuse_cleanup_wrapper,
+         )
++
++
++def k26_bf16_mla_linear(self):
++    # Core supports this column-parallel projection and gathers its low-rank
++    # output explicitly. Avoid TELinear, whose base is only a TE import shim.
++    from megatron.core.tensor_parallel.layers import ColumnParallelLinear
++    return ColumnParallelLinear
+ 
+ 
+ class TransformerEngineBasicFeature(MindSpeedFeature):
+@@ -116,15 +123,18 @@
+             transformer_block_checkpointed_forward,
+         )
+ 
+-        patch_manager.register_patch(
+-            'megatron.core.transformer.transformer_block.TransformerBlock.forward', transformer_block_forward
+-        )
+-        # Keep the existing patch order for other components.
+-        if not (getattr(args, 'swap_attention', False) or getattr(args, 'recompute_method', False) == 'block'):
+-            patch_manager.register_patch(
+-                'megatron.core.transformer.transformer_block.TransformerBlock._checkpointed_forward',
+-                transformer_block_checkpointed_forward,
+-            )
++        # K26 BF16 uses Core's current block API, including padding masks and
++        # rotary_pos_cos_sin. The legacy custom block is only needed for FP8.
++        if getattr(args, 'fp8', None):
++            patch_manager.register_patch(
++                'megatron.core.transformer.transformer_block.TransformerBlock.forward', transformer_block_forward
++            )
++            # Keep the existing patch order for other components.
++            if not (getattr(args, 'swap_attention', False) or getattr(args, 'recompute_method', False) == 'block'):
++                patch_manager.register_patch(
++                    'megatron.core.transformer.transformer_block.TransformerBlock._checkpointed_forward',
++                    transformer_block_checkpointed_forward,
++                )
+ 
+         if not getattr(args, 'te_gmm_mode', 'compatible') == 'performance':
+             from mindspeed.te.pytorch.module.grouped_linear import (
+@@ -238,6 +248,10 @@
+                 MindSpeedTEDotProductAttention,
+             )
+             from megatron.core.tensor_parallel.layers import ColumnParallelLinear, RowParallelLinear
++            patch_manager.register_patch(
++                'megatron.core.extensions.transformer_engine_spec_provider.TESpecProvider.linear',
++                k26_bf16_mla_linear,
++            )
+             from mindspeed.te.pytorch.module.layernorm_column_parallel_linear import (
+                 MindSpeedTELayerNormColumnParallelLinear,
+             )

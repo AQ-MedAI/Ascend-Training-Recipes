@@ -5,7 +5,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from prepare_framework_sources import manifest_sources, patch_specs, verify
+from prepare_framework_sources import manifest_sources, patch_specs, source_commit, verify
 
 
 def git(checkout, *args):
@@ -51,7 +51,7 @@ def inspect_checkout(checkout, sources):
         raise RuntimeError(f"Staged changes in {checkout}; preserve them before updating sources")
     if not git(checkout, "status", "--porcelain"):
         return None
-    head = git(checkout, "rev-parse", "HEAD").strip()
+    head = source_commit(checkout)
     for index, source in enumerate(sources):
         if head != source["commit"]:
             continue

@@ -122,3 +122,61 @@ scaling, wrapper keyword compatibility, and TP size selection. They use stubbed
 NPU collaborators and do not validate attention outputs or distributed training.
 
 MLA groups patch SHA-256: `936c81b4183be6ede3bb40f40b46f7acbda744e84ed232c09debc01db2eacef5`.
+
+
+## BF16 model construction and forward interfaces
+
+`ascend-te-model-contracts.patch` is an incremental compatibility patch for the
+K26 Core baseline. Keep the previous MLA and optional-import patches applied.
+
+The review covered Core attention/MLA callers, dense/shared MLP and TE grouped
+experts, MindSpeed's compatible and performance grouped wrappers, packed-sequence
+forwarding, and the BF16 block/recomputation selection used by the K26 RL recipe.
+
+- TE attention receives `pg_collection`, uses its TP group and size, and uses its
+  CP group and global ranks when CP is enabled.
+- Fused Norm+ColumnLinear accepts explicit TP and stride, forwards the TP group
+  through BF16 communication/linear calls and checkpoint metadata, and preserves
+  weight/bias partition stride.
+- Grouped column/row wrappers forward explicit groups; the bases select expert TP
+  for experts and attention TP otherwise. Conflicting explicit groups fail.
+- BF16 MLA low-rank projections use Core ColumnParallelLinear, which Core
+  explicitly handles by gathering the compressed output. The TE `TELinear` shim
+  is not selected for these projections.
+- BF16 retains upstream Core `TransformerBlock.forward` and uniform recomputation,
+  including padding masks and current quantization-context keyword names. The
+  old custom block implementation remains restricted to FP8.
+- Packed CP metadata is validated separately instead of forwarding unsupported
+  keywords to the attention backend. Dynamic CP layouts differing from the
+  configured groups are rejected explicitly; no communication algorithm is
+  silently substituted.
+
+Apply this increment in the container:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-te-model-contracts.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-te-model-contracts.patch"
+```
+
+The updated K26 `runtime_env.sh` runs `tools/check_k26_runtime_contracts.py`
+before Ray starts. It checks seven loaded interfaces and reports the actual source
+file if an old adapter is still selected. This is an early interface check, not
+a model construction or numerical test; feature repatching inside workers still
+requires the distributed smoke test.
+
+CPU regression checks compare actual Core call keywords against patched adapter
+signatures, exercise TE attention group propagation and packed forwarding, check
+expert partition shapes with different attention/expert TP sizes, and verify
+BF16 block selection and early rejection of old loaded adapters. All K26
+MindSpeed patches were also applied together to a temporary source fixture and
+syntax checked.
+
+Validation scope is the current unquantized BF16, text-only, PP=1 smoke recipe
+with uniform full recomputation. This is not a completed compatibility claim for
+FP8/FP4, dynamic CP, pipeline overlap/DualPipe, MC2, custom FSDP, or delayed weight
+gradients. NPU attention values, optimizer steps, rollout weight synchronization,
+and checkpoint save/resume remain target-container checks. No local NPU runtime
+was available for this review.
+
+TE model patch SHA-256: `b722d959f963d189f6421e38863e7f8dfda159556c30bf84a73571440b92bd6e`.

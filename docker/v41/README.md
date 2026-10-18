@@ -27,6 +27,8 @@ Dockerfile 使用 BuildKit 自带的前端，不额外拉取 `docker/dockerfile:
 
 从 recipe 根目录构建公共基础层：
 
+Python 包默认使用官方 PyPI。可用 `--build-arg PIP_INDEX_URL=https://<mirror>/simple` 覆盖，pip 与 uv 均使用该地址；也可通过 `--build-arg UV_INDEX_URL=...` 单独指定 uv 的源。硬件 bootstrap 仍额外查询华为公开 Ascend 源（pip 的 extra index 不表示优先级）。构建器需能访问指定源；更换源会使相关安装层重新构建。
+
 ```bash
 docker build --platform linux/arm64 --target common \
   -f docker/v41/Dockerfile -t ascend-training-common:dev .
@@ -38,6 +40,8 @@ docker build --platform linux/arm64 --target common \
 docker build --platform linux/arm64 --target v41 \
   -f docker/v41/Dockerfile -t ascend-training-v41:dev .
 ```
+
+七个框架（Megatron-LM、vLLM、vLLM-Ascend、MindSpeed、MindSpeed-LLM、mbridge、verl）默认从公开的 `codeload.github.com` 下载固定 commit 的源码归档，避开 Git smart-HTTP 链路；下载有连接超时和重试，随后仍校验补丁 SHA256、参考快照、最终完整文件清单、逐文件 SHA256、符号链接和执行权限。归档模式创建本地 Git 基线并保留清单中的子模块提交记录，不下载嵌套子模块；本地 `HEAD` 不是上游 commit，构建和环境校验通过 Git 配置中的上游 pin 配合源码清单进行核验。需要上游 Git checkout 时添加 `--build-arg FRAMEWORK_SOURCE_TRANSPORT=git`；`--build-arg MEGATRON_SOURCE_TRANSPORT=git` 可单独覆盖 Megatron-LM。两种方式均需要构建环境能访问对应公开地址；代理可通过 Docker 标准 `HTTP_PROXY` / `HTTPS_PROXY` 构建参数传入，不在镜像文件中写入内部地址。原生依赖中的两份 GitCode Catlass blob 仍按原方式获取并校验，不受该参数控制。
 
 镜像启动后默认进入 `/opt/ascend-training/Ascend-Training-Recipes`，entrypoint 自动激活环境。无需 clone 或安装：
 

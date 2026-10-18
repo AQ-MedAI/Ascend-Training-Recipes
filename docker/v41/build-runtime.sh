@@ -74,14 +74,14 @@ import subprocess
 import sys
 from pathlib import Path
 sys.path.insert(0, '/tmp/ascend-image-build/tools')
-from prepare_framework_sources import verify
+from prepare_framework_sources import source_commit, verify
 from prepare_image_sources import image_sources
 root = Path('/opt/ascend-training/third_party')
 packages = {'MindSpeed': 'mindspeed', 'MindSpeed-LLM': 'mindspeed_llm', 'mbridge': 'mbridge', 'verl': 'verl'}
 for name, source in image_sources(Path('/tmp/ascend-image-build'))[1].items():
     checkout = root / name
     verify(checkout, source, tracked=True)
-    actual = subprocess.check_output(['git', '-C', str(checkout), 'rev-parse', 'HEAD'], text=True).strip()
+    actual = source_commit(checkout)
     assert actual == source['commit'], (name, actual)
     spec = importlib.util.find_spec(packages[name])
     if spec is None or spec.origin is None or not Path(spec.origin).resolve().is_relative_to(checkout):
