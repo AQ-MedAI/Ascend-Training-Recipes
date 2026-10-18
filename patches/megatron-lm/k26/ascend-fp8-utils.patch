@@ -1,0 +1,104 @@
+--- a/megatron/core/fp8_utils.py
++++ b/megatron/core/fp8_utils.py
+@@ -24,11 +24,18 @@
+ HAVE_TE = False
+ try:
+     import transformer_engine  # pylint: disable=W0611
+-
++    from transformer_engine.pytorch.fp8 import FP8GlobalStateManager
++
++    # An importable MindSpeed shim is not a complete TE quantization backend.
++    if is_te_min_version("2.0"):
++        from transformer_engine.pytorch.tensor import QuantizedTensor as FP8_TENSOR_CLASS
++    else:
++        from transformer_engine.pytorch.float8_tensor import Float8Tensor as FP8_TENSOR_CLASS
+     HAVE_TE = True
+ except (ImportError, ModuleNotFoundError):
+-    # Transformer Engine not found
+-    pass
++    # Missing package or FP8 APIs: retain the existing non-quantized path.
++    FP8GlobalStateManager = None
++    FP8_TENSOR_CLASS = None
+ 
+ try:
+     from packaging.version import Version as PkgVersion
+@@ -38,19 +45,7 @@
+     HAVE_PACKAGING = False
+ 
+ # Check if Transformer Engine has class for fp8 tensors.
+-HAVE_TE_FP8_TENSOR_CLASS = False
+-if HAVE_TE:
+-    if is_te_min_version("2.0"):
+-        # In TE2.x, QuantizedTensor is the base class for all different type of fp8 tensors,
+-        # including fp8 tensor for delayed scaling, current scaling and mxfp8, etc.
+-        from transformer_engine.pytorch.tensor import QuantizedTensor as FP8_TENSOR_CLASS
+-    else:
+-        from transformer_engine.pytorch.float8_tensor import Float8Tensor as FP8_TENSOR_CLASS
+-
+-    HAVE_TE_FP8_TENSOR_CLASS = True
+-else:
+-    HAVE_TE_FP8_TENSOR_CLASS = False
+-    FP8_TENSOR_CLASS = None
++HAVE_TE_FP8_TENSOR_CLASS = HAVE_TE
+ 
+ # Check if Transformer Engine has MXFP8Tensor class
+ 
+@@ -656,11 +651,15 @@
+ else:
+ 
+     def get_fp8_recipe(config: TransformerConfig):
+-        """Returns None since TE is not available."""
++        """Return no recipe for BF16; reject unsupported quantized execution."""
++        if getattr(config, "fp8", None) or getattr(config, "fp8_param", False):
++            raise RuntimeError("FP8 requires a complete Transformer Engine backend")
+         return None
+ 
+     def get_fp8_context(config: TransformerConfig, layer_no: int = -1, is_init: bool = False):
+-        """Returns dummy fp8 context manager since TE is not available."""
++        """Use the ordinary BF16 context when optional TE FP8 is unavailable."""
++        if getattr(config, "fp8_param" if is_init else "fp8", None):
++            raise RuntimeError("FP8 requires a complete Transformer Engine backend")
+         return nullcontext()
+ 
+ 
+--- a/megatron/core/fp4_utils.py
++++ b/megatron/core/fp4_utils.py
+@@ -7,19 +7,13 @@
+ import torch
+ 
+ from megatron.core.enums import Fp4Recipe
+-from megatron.core.fp8_utils import _get_custom_recipe
++from megatron.core.fp8_utils import HAVE_TE, _get_custom_recipe
+ from megatron.core.transformer.transformer_config import TransformerConfig
+ from megatron.core.utils import is_te_min_version
+ 
+-# Check if Transformer Engine is installed
+-HAVE_TE = False
+-try:
++# Use the validated quantization backend flag; a TE shim alone is insufficient.
++if HAVE_TE:
+     import transformer_engine  # pylint: disable=W0611
+-
+-    HAVE_TE = True
+-except (ImportError, ModuleNotFoundError):
+-    # Transformer Engine not found
+-    pass
+ 
+ 
+ # Check if Transformer Engine has class for fp4 tensors.
+@@ -163,9 +157,13 @@
+ else:
+ 
+     def get_fp4_recipe(config: TransformerConfig):
+-        """Return None when Transformer Engine is not available."""
++        """Return no recipe for BF16; reject unsupported quantized execution."""
++        if getattr(config, "fp4", None) or getattr(config, "fp4_param", False):
++            raise RuntimeError("FP4 requires a complete Transformer Engine backend")
+         return None
+ 
+     def get_fp4_context(config: TransformerConfig, layer_no: int = -1, is_init: bool = False):
+-        """Return nullcontext when Transformer Engine is not available."""
++        """Use the ordinary BF16 context when optional TE FP4 is unavailable."""
++        if getattr(config, "fp4_param" if is_init else "fp4", None):
++            raise RuntimeError("FP4 requires a complete Transformer Engine backend")
+         return nullcontext()

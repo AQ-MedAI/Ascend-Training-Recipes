@@ -16,6 +16,18 @@ git apply --check /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k2
 git apply /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-optional-te.patch
 ```
 
+`ascend-fp8-utils.patch` is an additional patch for `fp8_utils.py` and `fp4_utils.py`. It checks actual FP8 state/tensor imports instead of treating an importable MindSpeed TE shim as a complete backend. FP4 reuses the validated flag. BF16 retains its ordinary context; explicit FP8/FP4 requests without TE raise an error.
+
+If `ascend-optional-te.patch` is already applied, leave it in place and apply only this increment:
+
+```bash
+cd /opt/ascend-training/Megatron-LM
+git apply --check /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-fp8-utils.patch
+git apply /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-fp8-utils.patch
+```
+
 Restart the failed training task in fresh processes after applying. The runtime environment script does not apply this patch automatically. This does not complete K2.6 NPU compatibility or provide FP8 support.
 
 Patch SHA-256: `c59e7a1986a791bdbaa88632422cc2cf052b52494ee973d64716da7159da3ed2`.
+
+FP8 utilities patch SHA-256: `4b8a9670e5921c090a7e253193b22f741b1b75dc13685cbc8dabf59f5f374949`.
