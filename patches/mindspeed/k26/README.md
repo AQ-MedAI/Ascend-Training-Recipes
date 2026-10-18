@@ -92,3 +92,33 @@ legacy package exports, import caching, and error propagation for requested
 optional implementations. Complete NPU training remains to be validated.
 
 Patch SHA-256: `5ee40290217a7c0f92a46938b48dfa9c2177502287624b67f05dda0018065f34`.
+
+
+## MLA explicit process groups
+
+`ascend-mla-process-groups.patch` updates the MindSpeed MLA initializer and its
+DotProductAttention initializer wrapper for K26 Core's explicit `pg_collection`
+interface. It forwards the group collection to base attention and core attention,
+passes CP to rotary embeddings and TP to the output projection, and makes the
+MindSpeed DotProductAttention replacement use the supplied TP size. Calls that
+do not supply a collection retain the global-group fallback.
+
+The patch also initializes `cache_mla_latents`, aligns MLA attention scaling with
+Core's `mscale_all_dim`, and uses `original_max_position_embeddings` for YaRN
+rather than the extended maximum sequence length. It retains MindSpeed's NPU
+attention implementation; it does not add CUDA/TE kernels or FP8 support.
+
+Apply as an increment, retaining earlier K26 patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-mla-process-groups.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-mla-process-groups.patch"
+```
+
+Restart training workers. CPU checks cover explicit TP/CP identity propagation,
+RoPE and YaRN constructor arguments, the original YaRN context length, MLA
+scaling, wrapper keyword compatibility, and TP size selection. They use stubbed
+NPU collaborators and do not validate attention outputs or distributed training.
+
+MLA groups patch SHA-256: `936c81b4183be6ede3bb40f40b46f7acbda744e84ed232c09debc01db2eacef5`.
