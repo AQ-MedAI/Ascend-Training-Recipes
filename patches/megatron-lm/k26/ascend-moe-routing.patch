@@ -1,0 +1,45 @@
+--- a/megatron/core/transformer/moe/moe_utils.py
++++ b/megatron/core/transformer/moe/moe_utils.py
+@@ -861,6 +861,42 @@
+         final_probs = routing_probs * final_map
+ 
+     return final_probs, final_map
++
++
++def topk_softmax_with_capacity(
++    logits: torch.Tensor,
++    topk: int,
++    capacity_factor: Optional[float] = None,
++    pad_to_capacity: bool = False,
++    drop_policy: str = "probs",
++    use_pre_softmax: bool = False,
++    num_groups: Optional[int] = None,
++    group_topk: Optional[int] = None,
++    scaling_factor: Optional[float] = None,
++    deterministic_mode: bool = False,
++    score_function: str = "softmax",
++    expert_bias: Optional[torch.Tensor] = None,
++):
++    """Legacy MindSpeed routing API, including counts before capacity dropping.
++
++    As in the previous implementation, deterministic_mode is retained for call
++    compatibility; deterministic routing follows PyTorch's global setting.
++    """
++    probs, routing_map = topk_routing_with_score_function(
++        logits, topk, use_pre_softmax=use_pre_softmax,
++        num_groups=num_groups, group_topk=group_topk,
++        scaling_factor=scaling_factor, score_function=score_function,
++        expert_bias=expert_bias, fused=False,
++    )
++    tokens_per_expert = routing_map.sum(dim=0)
++    if capacity_factor is not None:
++        if drop_policy not in ("probs", "position"):
++            raise ValueError(f"Invalid drop_policy: {drop_policy}")
++        probs, routing_map = apply_router_token_dropping(
++            probs, routing_map, topk, capacity_factor,
++            drop_policy=drop_policy, pad_to_capacity=pad_to_capacity,
++        )
++    return probs, routing_map, tokens_per_expert
+ 
+ 
+ def save_to_aux_losses_tracker(

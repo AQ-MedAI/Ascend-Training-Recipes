@@ -1,0 +1,64 @@
+--- a/mindspeed/features_manager/moe/gmm.py
++++ b/mindspeed/features_manager/moe/gmm.py
+@@ -19,15 +19,22 @@
+                 raise AssertionError('`--gemm-gradient-accumulation-fusion` only support with `--moe-grouped-gemm`.')
+ 
+     def register_patches(self, patch_manager, args):
+-        from mindspeed.core.transformer.moe.moe_feature.adaptor import MindSpeedGmmExperts
+-        from mindspeed.core.transformer.moe.moe_feature.common import ascend_gmm_preprocess
++        from mindspeed.core.transformer.moe.moe_feature.gmm.adapter import MindSpeedGmmExperts
+         if args.moe_grouped_gemm:
+             patch_manager.register_patch(
+                 'megatron.core.transformer.moe.experts.GroupedMLP',
+                 MindSpeedGmmExperts)
+-            patch_manager.register_patch(
+-                'megatron.core.transformer.moe.legacy_a2a_token_dispatcher.MoEAlltoAllSEQTokenDispatcher.preprocess',
+-                ascend_gmm_preprocess)
++            # Current alltoall dispatch has its own preprocess implementation.
++            from importlib.util import find_spec
++            legacy_module = 'megatron.core.transformer.moe.legacy_a2a_token_dispatcher'
++            if find_spec(legacy_module) is not None:
++                from mindspeed.core.transformer.moe.moe_feature.common import ascend_gmm_preprocess
++                patch_manager.register_patch(
++                    legacy_module + '.MoEAlltoAllSEQTokenDispatcher.preprocess',
++                    ascend_gmm_preprocess)
++            elif getattr(args, 'moe_token_dispatcher_type', None) == 'alltoall_seq':
++                raise RuntimeError('alltoall_seq requires the removed legacy Megatron dispatcher; '
++                                   'use the supported alltoall dispatcher for K26')
+ 
+         if args.use_ascend_mc2 and not hasattr(args, 'moe_grouped_gemm'):
+             # MoE MLP not use mc2 linear
+--- /dev/null
++++ b/mindspeed/core/transformer/moe/moe_feature/gmm/adapter.py
+@@ -0,0 +1,8 @@
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
++"""Grouped experts without importing unrelated legacy communication adaptors."""
++from megatron.core.transformer.moe.experts import GroupedMLP
++from mindspeed.core.transformer.moe.moe_feature.gmm.experts import GmmExpertsImpl
++
++
++class MindSpeedGmmExperts(GmmExpertsImpl, GroupedMLP):
++    pass
+--- a/mindspeed/core/transformer/moe/moe_feature/gmm/experts.py
++++ b/mindspeed/core/transformer/moe/moe_feature/gmm/experts.py
+@@ -18,7 +18,7 @@
+     support gemm_fusion and activation recompute.
+     """
+ 
+-    def __init__(self, num_local_experts, config=None):
++    def __init__(self, num_local_experts, config=None, pg_collection=None):
+         """adjust the logic for generate expert weight to avoid splitting by tp_size
+ 
+         Args:
+@@ -33,7 +33,10 @@
+         self.weight1 = None
+         self.weight2 = None
+         self.activation_checkpoint_manager = None
+-        super().__init__(num_local_experts, config)
++        if pg_collection is None:
++            super().__init__(num_local_experts, config)
++        else:
++            super().__init__(num_local_experts, config, pg_collection=pg_collection)
+         if self.config.gated_linear_unit:
+             assert self.config.activation_func == F.silu, 'Activation function must be silu when using fused_swiglu.'
+             self.activation_func = fused_swiglu

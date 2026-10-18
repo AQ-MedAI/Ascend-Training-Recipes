@@ -47,3 +47,31 @@ git apply /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend
 CPU tests cover temporary Expert-TP state and restoration on normal, exceptional and nested execution. They do not validate distributed checkpoint files or full NPU save/resume.
 
 Expert checkpoint patch SHA-256: `f081d08714203706d406f70fc7fe84b78f7f15e091258b092e77fc279a5e7d26`.
+
+
+## Legacy MoE routing API
+
+`ascend-moe-routing.patch` restores `topk_softmax_with_capacity` using the baseline's
+`topk_routing_with_score_function` and `apply_router_token_dropping`. It returns
+probabilities, the routing map, and **counts before token dropping**, as expected
+by MindSpeed. It retains the old argument order, expert bias, group selection,
+scaling, and capacity/padding options. The compatibility argument
+`deterministic_mode` follows the previous implementation; PyTorch's global
+setting controls deterministic execution.
+
+Apply this additional patch without reverting the earlier three:
+
+```bash
+git -C /opt/ascend-training/Megatron-LM apply --check /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-moe-routing.patch
+git -C /opt/ascend-training/Megatron-LM apply /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-moe-routing.patch
+```
+
+CPU verification compared outputs and input gradients with the previous routing
+implementation across 384 configurations. Repository tests also check the
+three-value contract, expert bias, group limits, and counts before capacity
+truncation. These checks do not validate distributed NPU execution.
+
+See [MindSpeed K26 compatibility](../../mindspeed/k26/README.md) for the accompanying
+import and grouped-expert adaptations and remaining validation scope.
+
+Routing patch SHA-256: `65653945aac928dc1a7e7ffda9b79f4fc65c6d31d04b62d8ef40d796da156df3`.

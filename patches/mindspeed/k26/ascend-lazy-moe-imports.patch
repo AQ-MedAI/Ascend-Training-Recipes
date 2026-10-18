@@ -1,0 +1,186 @@
+--- a/mindspeed/core/transformer/moe/moe_feature/__init__.py
++++ b/mindspeed/core/transformer/moe/moe_feature/__init__.py
+@@ -1,70 +1,83 @@
+-# Copyright (c) 2025; NVIDIA CORPORATION. All rights reserved.
+-# Copyright (c) 2025, Huawei Technologies Co., Ltd.  All rights reserved.
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
+ 
+-from megatron.core import parallel_state, tensor_parallel, InferenceParams
+-from megatron.core.transformer.moe.router import MoEAuxLossAutoScaler, TopKRouter
+-from megatron.core.transformer.module import MegatronModule
+-from megatron.core.transformer.mlp import MLPSubmodules, MLP
+-from megatron.core.transformer.transformer_config import TransformerConfig
+-from megatron.core.transformer.moe import grouped_gemm_util
+-from megatron.core.transformer.spec_utils import build_module, ModuleSpec
++"""Load feature exports on demand without initializing unrelated MoE modes."""
+ 
+-from megatron.core.transformer.moe.moe_utils import (
+-    permute,
+-    unpermute,
+-    save_to_aux_losses_tracker,
+-    sort_chunks_by_idxs,
+-    get_capacity,
+-    topk_softmax_with_capacity,
+-    maybe_move_tensor_to_cpu
+-)
++from importlib import import_module as _import_module
+ 
+-from megatron.core.tensor_parallel.layers import (
+-    _initialize_affine_weight_cpu,
+-    _initialize_affine_weight_gpu,
+-    linear_with_grad_accumulation_and_async_allreduce,
+-    linear_with_frozen_weight
+-)
++_EXPORTS = {
++    'parallel_state': ('megatron.core', 'parallel_state'),
++    'tensor_parallel': ('megatron.core', 'tensor_parallel'),
++    'InferenceParams': ('megatron.core', 'InferenceParams'),
++    'MoEAuxLossAutoScaler': ('megatron.core.transformer.moe.router', 'MoEAuxLossAutoScaler'),
++    'TopKRouter': ('megatron.core.transformer.moe.router', 'TopKRouter'),
++    'MegatronModule': ('megatron.core.transformer.module', 'MegatronModule'),
++    'MLPSubmodules': ('megatron.core.transformer.mlp', 'MLPSubmodules'),
++    'MLP': ('megatron.core.transformer.mlp', 'MLP'),
++    'TransformerConfig': ('megatron.core.transformer.transformer_config', 'TransformerConfig'),
++    'grouped_gemm_util': ('megatron.core.transformer.moe', 'grouped_gemm_util'),
++    'build_module': ('megatron.core.transformer.spec_utils', 'build_module'),
++    'ModuleSpec': ('megatron.core.transformer.spec_utils', 'ModuleSpec'),
++    'permute': ('megatron.core.transformer.moe.moe_utils', 'permute'),
++    'unpermute': ('megatron.core.transformer.moe.moe_utils', 'unpermute'),
++    'save_to_aux_losses_tracker': ('megatron.core.transformer.moe.moe_utils', 'save_to_aux_losses_tracker'),
++    'sort_chunks_by_idxs': ('megatron.core.transformer.moe.moe_utils', 'sort_chunks_by_idxs'),
++    'get_capacity': ('megatron.core.transformer.moe.moe_utils', 'get_capacity'),
++    'topk_softmax_with_capacity': ('megatron.core.transformer.moe.moe_utils', 'topk_softmax_with_capacity'),
++    'maybe_move_tensor_to_cpu': ('megatron.core.transformer.moe.moe_utils', 'maybe_move_tensor_to_cpu'),
++    '_initialize_affine_weight_cpu': ('megatron.core.tensor_parallel.layers', '_initialize_affine_weight_cpu'),
++    '_initialize_affine_weight_gpu': ('megatron.core.tensor_parallel.layers', '_initialize_affine_weight_gpu'),
++    'linear_with_grad_accumulation_and_async_allreduce': ('megatron.core.tensor_parallel.layers', 'linear_with_grad_accumulation_and_async_allreduce'),
++    'linear_with_frozen_weight': ('megatron.core.tensor_parallel.layers', 'linear_with_frozen_weight'),
++    'copy_to_tensor_model_parallel_region': ('megatron.core.tensor_parallel.mappings', 'copy_to_tensor_model_parallel_region'),
++    'gather_from_tensor_model_parallel_region': ('megatron.core.tensor_parallel.mappings', 'gather_from_tensor_model_parallel_region'),
++    'reduce_from_tensor_model_parallel_region': ('megatron.core.tensor_parallel.mappings', 'reduce_from_tensor_model_parallel_region'),
++    'reduce_scatter_to_sequence_parallel_region': ('megatron.core.tensor_parallel.mappings', 'reduce_scatter_to_sequence_parallel_region'),
++    'scatter_to_tensor_model_parallel_region': ('megatron.core.tensor_parallel.mappings', 'scatter_to_tensor_model_parallel_region'),
++    '_reduce_scatter_along_first_dim': ('megatron.core.tensor_parallel.mappings', '_reduce_scatter_along_first_dim'),
++    '_gather_along_first_dim': ('megatron.core.tensor_parallel.mappings', '_gather_along_first_dim'),
++    '_split_along_first_dim': ('megatron.core.tensor_parallel.mappings', '_split_along_first_dim'),
++    'scatter_to_sequence_parallel_region': ('megatron.core.tensor_parallel.mappings', 'scatter_to_sequence_parallel_region'),
++    'all_gather_last_dim_from_tensor_parallel_region': ('megatron.core.tensor_parallel.mappings', 'all_gather_last_dim_from_tensor_parallel_region'),
++    'VocabUtility': ('megatron.core.tensor_parallel.utils', 'VocabUtility'),
++    'divide': ('megatron.core.tensor_parallel.utils', 'divide'),
++    'split_tensor_along_last_dim': ('megatron.core.tensor_parallel.utils', 'split_tensor_along_last_dim'),
++    'make_tp_sharded_tensor_for_checkpoint': ('megatron.core.utils', 'make_tp_sharded_tensor_for_checkpoint'),
++    'prepare_input_tensors_for_wgrad_compute': ('megatron.core.utils', 'prepare_input_tensors_for_wgrad_compute'),
++    'make_sharded_tensors_for_checkpoint': ('megatron.core.transformer.utils', 'make_sharded_tensors_for_checkpoint'),
++    'ModelParallelConfig': ('megatron.core.model_parallel_config', 'ModelParallelConfig'),
++    'get_global_memory_buffer': ('megatron.core.parallel_state', 'get_global_memory_buffer'),
++    'get_tensor_model_parallel_group': ('megatron.core.parallel_state', 'get_tensor_model_parallel_group'),
++    'get_tensor_model_parallel_rank': ('megatron.core.parallel_state', 'get_tensor_model_parallel_rank'),
++    'get_tensor_model_parallel_world_size': ('megatron.core.parallel_state', 'get_tensor_model_parallel_world_size'),
++    'gather_from_sequence_parallel_region': ('megatron.core.tensor_parallel', 'gather_from_sequence_parallel_region'),
++    'MultiTokenPredictionBlockSubmodules': ('megatron.core.transformer.multi_token_prediction', 'MultiTokenPredictionBlockSubmodules'),
++    'MoELayer': ('megatron.core.transformer.moe.moe_layer', 'MoELayer'),
++    'BaseMoELayer': ('megatron.core.transformer.moe.moe_layer', 'BaseMoELayer'),
++    'MegatronBaseMoeLayer': ('megatron.core.transformer.moe.moe_layer', 'BaseMoELayer'),
++    'SharedExpertMLP': ('megatron.core.transformer.moe.shared_experts', 'SharedExpertMLP'),
++    'set_tensor_grad_fn_sequence_sr': ('megatron.core.transformer.moe.shared_experts', 'set_tensor_grad_fn_sequence_sr'),
++    'GroupedMLP': ('megatron.core.transformer.moe.experts', 'GroupedMLP'),
++    'MoEAlltoAllSEQTokenDispatcher': ('megatron.core.transformer.moe.legacy_a2a_token_dispatcher', 'MoEAlltoAllSEQTokenDispatcher'),
++    'MoEAlltoAllTokenDispatcher': ('megatron.core.transformer.moe.token_dispatcher', 'MoEAlltoAllTokenDispatcher'),
++    'MoEAllGatherTokenDispatcher': ('megatron.core.transformer.moe.token_dispatcher', 'MoEAllGatherTokenDispatcher'),
++    'PackedSeqParams': ('megatron.core.packed_seq_params', 'PackedSeqParams'),
++    'make_viewless_tensor': ('megatron.core.utils', 'make_viewless_tensor'),
++    'BaseInferenceContext': ('megatron.core.inference.contexts', 'BaseInferenceContext'),
++    'bias_geglu_impl': ('megatron.core.fusions.fused_bias_geglu', 'bias_geglu_impl'),
++    'bias_gelu_impl': ('megatron.core.fusions.fused_bias_gelu', 'bias_gelu_impl'),
++    'bias_swiglu_impl': ('megatron.core.fusions.fused_bias_swiglu', 'bias_swiglu_impl'),
++    'get_args': ('mindspeed.args_utils', 'get_full_args'),
++}
+ 
+-from megatron.core.tensor_parallel.mappings import (
+-    copy_to_tensor_model_parallel_region,
+-    gather_from_tensor_model_parallel_region,
+-    reduce_from_tensor_model_parallel_region,
+-    reduce_scatter_to_sequence_parallel_region,
+-    scatter_to_tensor_model_parallel_region,
+-    _reduce_scatter_along_first_dim,
+-    _gather_along_first_dim,
+-    _split_along_first_dim,
+-    scatter_to_sequence_parallel_region,
+-    all_gather_last_dim_from_tensor_parallel_region
+-)
++__all__ = list(_EXPORTS)
+ 
+-from megatron.core.tensor_parallel.utils import VocabUtility, divide, split_tensor_along_last_dim
+-from megatron.core.utils import (
+-    make_tp_sharded_tensor_for_checkpoint,
+-    prepare_input_tensors_for_wgrad_compute
+-)
+-from megatron.core.transformer.utils import make_sharded_tensors_for_checkpoint
+-from megatron.core.model_parallel_config import ModelParallelConfig
+-from megatron.core.parallel_state import (
+-    get_global_memory_buffer,
+-    get_tensor_model_parallel_group,
+-    get_tensor_model_parallel_rank,
+-    get_tensor_model_parallel_world_size,
+-)
++def __getattr__(name):
++    if name not in _EXPORTS:
++        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
++    module, symbol = _EXPORTS[name]
++    value = getattr(_import_module(module, __name__), symbol)
++    globals()[name] = value
++    return value
+ 
+-from megatron.core.tensor_parallel import gather_from_sequence_parallel_region
+-from megatron.core.transformer.multi_token_prediction import MultiTokenPredictionBlockSubmodules
+-from megatron.core.transformer.moe.moe_layer import MoELayer, BaseMoELayer, BaseMoELayer as MegatronBaseMoeLayer
+-from megatron.core.transformer.moe.shared_experts import SharedExpertMLP, set_tensor_grad_fn_sequence_sr
+-from megatron.core.transformer.moe.experts import GroupedMLP
+-from megatron.core.transformer.moe.legacy_a2a_token_dispatcher import MoEAlltoAllSEQTokenDispatcher
+-from megatron.core.transformer.moe.token_dispatcher import MoEAlltoAllTokenDispatcher
+-from megatron.core.transformer.moe.token_dispatcher import MoEAllGatherTokenDispatcher
+-from megatron.core.packed_seq_params import PackedSeqParams
+-from megatron.core.utils import make_viewless_tensor
+-from megatron.core.inference.contexts import BaseInferenceContext
+-from megatron.core.fusions.fused_bias_geglu import bias_geglu_impl
+-from megatron.core.fusions.fused_bias_gelu import bias_gelu_impl
+-from megatron.core.fusions.fused_bias_swiglu import bias_swiglu_impl
+-from mindspeed.args_utils import get_full_args as get_args
+\ No newline at end of file
++def __dir__():
++    return sorted(set(globals()) | set(_EXPORTS))
+--- a/mindspeed/core/transformer/moe/moe_feature/fb_overlap/__init__.py
++++ b/mindspeed/core/transformer/moe/moe_feature/fb_overlap/__init__.py
+@@ -1,4 +1,27 @@
+-from .modules.layers import linear_backward_wgrad_detach
+-from .transformer_layer import transformer_layer_forward_backward_overlaping, dualpipev_fb_overlap_mtp_layer_forward
+-from .transformer_block import transformer_block_fb_overlap_init_wrapper, mtp_block_fb_overlap_forward_wrapper
+-from .vpp_schedules import forward_backward_pipelining_with_interleaving
+\ No newline at end of file
++# Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
++
++"""Load feature exports on demand without initializing unrelated MoE modes."""
++
++from importlib import import_module as _import_module
++
++_EXPORTS = {
++    'linear_backward_wgrad_detach': ('.modules.layers', 'linear_backward_wgrad_detach'),
++    'transformer_layer_forward_backward_overlaping': ('.transformer_layer', 'transformer_layer_forward_backward_overlaping'),
++    'dualpipev_fb_overlap_mtp_layer_forward': ('.transformer_layer', 'dualpipev_fb_overlap_mtp_layer_forward'),
++    'transformer_block_fb_overlap_init_wrapper': ('.transformer_block', 'transformer_block_fb_overlap_init_wrapper'),
++    'mtp_block_fb_overlap_forward_wrapper': ('.transformer_block', 'mtp_block_fb_overlap_forward_wrapper'),
++    'forward_backward_pipelining_with_interleaving': ('.vpp_schedules', 'forward_backward_pipelining_with_interleaving'),
++}
++
++__all__ = list(_EXPORTS)
++
++def __getattr__(name):
++    if name not in _EXPORTS:
++        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
++    module, symbol = _EXPORTS[name]
++    value = getattr(_import_module(module, __name__), symbol)
++    globals()[name] = value
++    return value
++
++def __dir__():
++    return sorted(set(globals()) | set(_EXPORTS))
