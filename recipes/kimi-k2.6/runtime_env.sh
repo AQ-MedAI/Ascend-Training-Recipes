@@ -23,5 +23,15 @@ for module, key in [(megatron.core, 'MEGATRON_ROOT'),
     print(f'{module.__name__}: {actual}', flush=True)
 # Exercise all Bridge imports used by verl; preserve the underlying traceback.
 from verl.models.mcore.bridge import AutoBridge
+# Optional engine imports can suppress ImportError during package initialization.
+# Import the requested NPU backend explicitly to expose its actual failure.
+import importlib
+from verl.utils.device import get_device_name
+from verl.workers.engine import EngineRegistry
+if get_device_name() == 'npu':
+    importlib.import_module('verl.workers.engine.mindspeed')
+importlib.import_module('verl.workers.engine.megatron')
+engine_cls = EngineRegistry.get_engine_cls('language_model', 'megatron')
+print(f'K26 Megatron engine: {engine_cls.__module__}.{engine_cls.__name__}', flush=True)
 print(f'K26 training Python: {sys.executable}', flush=True)
 CHECK
