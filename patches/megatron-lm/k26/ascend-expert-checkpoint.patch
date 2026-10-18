@@ -1,0 +1,65 @@
+--- a/megatron/core/transformer/moe/experts.py
++++ b/megatron/core/transformer/moe/experts.py
+@@ -3,7 +3,7 @@
+ import copy
+ import logging
+ from copy import deepcopy
+-from functools import partial
++from functools import partial, wraps
+ from math import ceil
+ from typing import Optional, Tuple
+ 
+@@ -11,7 +11,7 @@
+ import torch.nn.functional as F
+ from torch.nn.parameter import Parameter
+ 
+-from megatron.core import tensor_parallel
++from megatron.core import parallel_state, tensor_parallel
+ from megatron.core.activations import squared_relu
+ from megatron.core.dist_checkpointing import ShardedTensor
+ from megatron.core.dist_checkpointing.mapping import (
+@@ -60,6 +60,44 @@
+     HAVE_TE = False
+ 
+ logger = logging.getLogger(__name__)
++
++
++def expert_dist_ckpt_decorator(func):
++    """Adapt legacy expert sharded_state_dict calls to Expert-TP parallel state.
++
++    Expert-TP size can differ from the attention tensor-parallel size.
++    To make distributed checkpoint work in such cases, we use a decorator to
++    replace the default TP parallel states with expert-TP parallel states.
++    """
++
++    @wraps(func)
++    def wrapper(*args, **kwargs):
++        # Store original states
++        original_rank = parallel_state._MPU_TENSOR_MODEL_PARALLEL_RANK
++        original_size = parallel_state._MPU_TENSOR_MODEL_PARALLEL_WORLD_SIZE
++        original_group = parallel_state._TENSOR_MODEL_PARALLEL_GROUP
++        try:
++            # Set new states
++            parallel_state._MPU_TENSOR_MODEL_PARALLEL_RANK = (
++                parallel_state.get_expert_tensor_parallel_rank()
++            )
++            parallel_state._MPU_TENSOR_MODEL_PARALLEL_WORLD_SIZE = (
++                parallel_state.get_expert_tensor_parallel_world_size()
++            )
++            parallel_state._TENSOR_MODEL_PARALLEL_GROUP = (
++                parallel_state.get_expert_tensor_parallel_group()
++            )
++
++            # Execute the function
++            result = func(*args, **kwargs)
++        finally:
++            # Restore original states
++            parallel_state._MPU_TENSOR_MODEL_PARALLEL_RANK = original_rank
++            parallel_state._MPU_TENSOR_MODEL_PARALLEL_WORLD_SIZE = original_size
++            parallel_state._TENSOR_MODEL_PARALLEL_GROUP = original_group
++        return result
++
++    return wrapper
+ 
+ 
+ class GroupedMLP(MegatronModule):

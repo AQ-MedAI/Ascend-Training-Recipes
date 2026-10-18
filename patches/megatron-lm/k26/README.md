@@ -31,3 +31,19 @@ Restart the failed training task in fresh processes after applying. The runtime 
 Patch SHA-256: `c59e7a1986a791bdbaa88632422cc2cf052b52494ee973d64716da7159da3ed2`.
 
 FP8 utilities patch SHA-256: `4b8a9670e5921c090a7e253193b22f741b1b75dc13685cbc8dabf59f5f374949`.
+
+## Legacy MindSpeed expert checkpoint API
+
+`ascend-expert-checkpoint.patch` restores `expert_dist_ckpt_decorator`, which the pinned MindSpeed grouped-linear modules still import. The implementation preserves the earlier Megatron interface: temporarily select expert tensor-parallel rank, world size and group while the wrapped checkpoint method runs, then restore all three in `finally`, including nested and failed calls. Native K2.6 Megatron checkpoint methods continue using their explicit process groups.
+
+Apply after the optional-TE patches (it touches a separate file):
+
+```bash
+cd /opt/ascend-training/Megatron-LM
+git apply --check /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-expert-checkpoint.patch
+git apply /workspace-verl/Ascend-Training-Recipes/patches/megatron-lm/k26/ascend-expert-checkpoint.patch
+```
+
+CPU tests cover temporary Expert-TP state and restoration on normal, exceptional and nested execution. They do not validate distributed checkpoint files or full NPU save/resume.
+
+Expert checkpoint patch SHA-256: `f081d08714203706d406f70fc7fe84b78f7f15e091258b092e77fc279a5e7d26`.
