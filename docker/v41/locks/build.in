@@ -1,4 +1,4 @@
-# Python build tools for Linux aarch64 / Python 3.12 (not a training runtime lock).
+# Python build tools for Linux aarch64 / Python 3.11.15 (not a training runtime lock).
 attrs==24.2.0
 cmake>=3.26.1,<4
 ninja

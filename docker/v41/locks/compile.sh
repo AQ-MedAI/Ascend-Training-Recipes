@@ -18,5 +18,5 @@ trap 'rm -f "$temporary"' EXIT
 constraints=()
 [[ "$PROFILE" != runtime ]] || constraints+=(--overrides runtime-overrides.txt)
 [[ ! -f "$PROFILE.lock" ]] || constraints+=(--constraint "$PROFILE.lock")
-"$UV_BIN" --no-config pip compile "$PROFILE.in"     --default-index https://pypi.org/simple     --python-version 3.12 --python-platform aarch64-manylinux_2_35     --only-binary :all: --generate-hashes --no-annotate --no-python-downloads     --custom-compile-command "bash docker/v41/locks/compile.sh $PROFILE"     "${constraints[@]}" --output-file "$temporary"
+"$UV_BIN" --no-config pip compile "$PROFILE.in"     --default-index https://pypi.org/simple     --python-version 3.11.15 --python-platform aarch64-manylinux_2_35     --only-binary :all: --generate-hashes --no-annotate --no-python-downloads     --custom-compile-command "bash docker/v41/locks/compile.sh $PROFILE"     "${constraints[@]}" --output-file "$temporary"
 mv "$temporary" "$PROFILE.lock"

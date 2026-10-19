@@ -23,15 +23,23 @@ WORKDIR /opt/ascend-training
 
 # Check the CANN development environment before installing the pinned Python stack.
 RUN test "$(uname -m)" = aarch64 && \
-    python3 -c 'import sys; assert sys.version_info[:2] == (3, 12), "This image requires Python 3.12"' && \
     test -f /usr/local/Ascend/ascend-toolkit/set_env.sh && \
     test -f /usr/local/Ascend/nnal/atb/set_env.sh
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git git-lfs curl ca-certificates patch rsync file unzip zip tar gzip xz-utils \
-        build-essential pkg-config libnuma-dev cmake && \
+        build-essential pkg-config libnuma-dev cmake \
+        libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+        libffi-dev liblzma-dev libgdbm-dev libncursesw5-dev uuid-dev && \
     rm -rf /var/lib/apt/lists/*
+# The CANN base supplies system tools; training uses a separate, exact Python build.
+COPY docker/v41/install_python.sh /tmp/install-training-python.sh
+RUN bash /tmp/install-training-python.sh && rm /tmp/install-training-python.sh
+ENV PATH="/usr/local/python3.11.15/bin:${PATH}" \
+    PYTHON_BIN=/usr/local/python3.11.15/bin/python3 \
+    ROLLOUT_PYTHON=/usr/local/python3.11.15/bin/python3
+RUN python3 -c 'import sys; assert sys.version_info[:3] == (3, 11, 15), sys.version'
 # Ubuntu's default python3-dev may target a different Python; require the base's matching headers.
-RUN python3 -c 'import pathlib, sysconfig; assert (pathlib.Path(sysconfig.get_path("include")) / "Python.h").is_file(), "Python 3.12 development headers are required"'
+RUN python3 -c 'import pathlib, sysconfig; assert (pathlib.Path(sysconfig.get_path("include")) / "Python.h").is_file(), "Python 3.11.15 development headers are required"'
 
 # Version-pinned bootstrap, not a complete hashed environment lock.
 COPY docker/v41/hardware-requirements.txt docker/v41/hardware-constraints.txt /tmp/ascend-image-build/

@@ -87,6 +87,35 @@ for name, source in image_sources(Path('/tmp/ascend-image-build'))[1].items():
     if spec is None or spec.origin is None or not Path(spec.origin).resolve().is_relative_to(checkout):
         raise RuntimeError(f'Editable installation does not resolve to {checkout}: {spec}')
 PY_SOURCES
+# Fail on dependency drift even when a stale hash lock or no-deps mode is used.
+"$PYTHON_BIN" -I - <<'PY_DATASETS'
+from importlib.metadata import version
+
+expected = {"datasets": "5.0.1", "pyarrow": "24.0.0", "numpy": "1.26.4"}
+actual = {name: version(name) for name in expected}
+if actual != expected:
+    raise RuntimeError(f"Dataset dependency versions differ: expected {expected}, got {actual}")
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+
+mismatches = []
+for line in Path("/tmp/ascend-image-build/locks/validated-runtime-constraints.txt").read_text().splitlines():
+    if not line or line.startswith("#"):
+        continue
+    name, wanted = line.split("==", 1)
+    try:
+        installed = version(name)
+    except PackageNotFoundError:
+        continue  # A constraint does not require an optional package to be installed.
+    if installed != wanted:
+        mismatches.append(f"{name}: expected {wanted}, got {installed}")
+if mismatches:
+    raise RuntimeError("Validated runtime version drift:\n" + "\n".join(mismatches))
+import datasets
+import pyarrow
+
+print(f"Dataset imports verified: {actual}")
+PY_DATASETS
 # Report declared conflicts without blocking this compatibility deployment.
 if ! "$PYTHON_BIN" -m pip check; then
     echo 'Dependency metadata conflicts reported above; continuing with the fixed deployment versions.' >&2
@@ -102,7 +131,7 @@ manifest = Path('/opt/ascend-training/manifest')
 expected = {'torch':'2.10.0', 'torch-npu':'2.10.0.post4', 'triton-ascend':'3.2.2', 'triton':'3.5.0'}
 report = json.loads((manifest / 'runtime-environment.json').read_text())
 packages = {p['name'].lower().replace('_', '-'):p['version'].split('+')[0] for p in report['packages']}
-expected.update({'numpy': '1.26.4', 'transformers': '5.14.1', 'fastapi': '0.123.10',
+expected.update({'numpy': '1.26.4', 'transformers': '5.8.1', 'fastapi': '0.123.10',
                  'starlette': '0.50.0', 'opencv-python-headless': '5.0.0.93',
                  'prometheus-fastapi-instrumentator': '8.1.0', 'mcp': '2.2.0',
                  'model-hosting-container-standards': '0.1.16'})

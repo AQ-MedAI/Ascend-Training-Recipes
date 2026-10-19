@@ -286,3 +286,23 @@ git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-rope-cp-gr
 
 Restart the training driver and Ray workers after applying the patch. The updated
 runtime contract checker checks the CP argument on MindSpeed, RoPE and YaRN.
+
+
+## Vocabulary embedding process group
+
+`ascend-vocab-embedding-group.patch` adapts the MindSpeed embedding forward to
+Core's `tp_group` interface. Both vocabulary masking and the reduction/scatter
+use the embedding's own group, rather than reading the removed
+`tensor_model_parallel_size` attribute or silently using a global group.
+Legacy modules without `tp_group` keep their existing attribute and collective calls.
+
+Apply to the prepared MindSpeed tree, then restart the training driver and workers:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-vocab-embedding-group.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-vocab-embedding-group.patch"
+```
+
+CPU tests cover explicit TP masking, gradients, sequence scatter/group forwarding,
+and the legacy TP1 path. They do not execute HCCL collectives.

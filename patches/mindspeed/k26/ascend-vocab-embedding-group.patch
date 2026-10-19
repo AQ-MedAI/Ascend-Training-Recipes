@@ -1,0 +1,33 @@
+--- a/mindspeed/core/tensor_parallel/vocab_parallel/vocab_parallel.py
++++ b/mindspeed/core/tensor_parallel/vocab_parallel/vocab_parallel.py
+@@ -24,7 +24,9 @@
+         input_,
+         reduce_from_tensor_model_parallel_region: Callable = None,
+         reduce_scatter_to_sequence_parallel_region: Callable = None):
+-    if self.tensor_model_parallel_size > 1:
++    tp_group = getattr(self, "tp_group", None)
++    tp_size = tp_group.size() if tp_group is not None else self.tensor_model_parallel_size
++    if tp_size > 1:
+         # Build the mask.
+         input_mask = (input_ < self.vocab_start_index) | \
+                      (input_ >= self.vocab_end_index)
+@@ -43,15 +45,16 @@
+         output_parallel = F.embedding(masked_input, self.weight)
+ 
+     # Mask the output embedding.
+-    if self.tensor_model_parallel_size > 1:
++    if tp_size > 1:
+         output_parallel *= ~input_mask[..., None]
+     # Reduce across all the model parallel GPUs.
++    group_kwargs = {"group": tp_group} if tp_group is not None else {}
+     if self.reduce_scatter_embeddings:
+         # Data format change to avoid explicit tranposes : [b s h] --> [s b h].
+         output_parallel = output_parallel.transpose(0, 1).contiguous()
+-        output = reduce_scatter_to_sequence_parallel_region(output_parallel)
++        output = reduce_scatter_to_sequence_parallel_region(output_parallel, **group_kwargs)
+     else:
+         # Reduce across all the model parallel GPUs.
+-        output = reduce_from_tensor_model_parallel_region(output_parallel)
++        output = reduce_from_tensor_model_parallel_region(output_parallel, **group_kwargs)
+     return output
+ 

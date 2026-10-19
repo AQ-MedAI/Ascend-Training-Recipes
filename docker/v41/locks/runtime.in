@@ -5,6 +5,8 @@
 -r ../hardware-requirements.txt
 -c ../hardware-constraints.txt
 numpy==1.26.4
+datasets==5.0.1
+pyarrow==24.0.0
 -r sources/megatron.in
 -r sources/megatron-core.in
 -r sources/mindspeed.in

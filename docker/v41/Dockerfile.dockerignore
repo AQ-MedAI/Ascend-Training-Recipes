@@ -15,6 +15,7 @@ patches/**/legacy/**
 !docker/v41/
 !docker/v41/Dockerfile
 !docker/v41/build-runtime.sh
+!docker/v41/install_python.sh
 !docker/v41/entrypoint.sh
 !docker/v41/collect_environment.py
 !docker/v41/hardware-requirements.txt
@@ -81,3 +82,6 @@ third_party/**
 **/reports
 **/checkpoints
 **/outputs
+
+# Local validated environment inventory; contains internal platform package names.
+/v41-validated-pip-versions.txt

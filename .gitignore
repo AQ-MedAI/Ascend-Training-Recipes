@@ -226,3 +226,6 @@ docker/v41/export_oss_image.py
 # CPU validation entry points for the shared framework backport.
 !docker/v41/tests/check_v41_cache_cpu.py
 !docker/v41/tests/check_v41_frontend_cpu.py
+
+# Local validated environment inventory; contains internal platform package names.
+/v41-validated-pip-versions.txt
