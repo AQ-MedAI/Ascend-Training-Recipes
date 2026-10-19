@@ -65,6 +65,10 @@ training steps, including rollout, backward/optimizer execution and subsequent
 rollout weight updates. NPU execution and peak memory remain to be validated for
 each topology.
 
+For checkpoint crash diagnosis only, set `SAVE_FREQ=-1` to skip saving while
+checking the two-step training loop. The default remains `SAVE_FREQ=1`. A run
+without saving does not validate checkpoint save/resume.
+
 `pipeline_layout.py` reads the actual text decoder depth before framework startup.
 A two-layer checkpoint with PP=2 uses an even 1+1 split; no full-model endpoint
 layer counts are injected. The established 61-layer/PP10 profile retains first=3,
@@ -135,3 +139,60 @@ through `runtime_env.sh`; set `MEGATRON_ROOT` and `MEGATRON_BRIDGE_ROOT` when
 using an existing compatible K26 environment.
 
 For the external K2.6 Megatron baseline, apply the [optional TE compatibility patch](../../patches/megatron-lm/k26/README.md) to `/opt/ascend-training/Megatron-LM` before sourcing `runtime_env.sh`. The patch enables import with an incomplete TE shim for non-FP8 execution; it does not provide FP8 support.
+
+## Diagnosing serialization crashes
+
+Disabling checkpoint saves does not disable serialization used by Ray batch
+transfers. The default DataProto path uses `torch.save` with an in-memory buffer.
+For comparison, run the RL smoke entry with
+`VERL_DATAPROTO_SERIALIZATION_METHOD=numpy SAVE_FREQ=-1`. This selects verl's
+existing NumPy transport for DataProto; it is not a global change to torch.save,
+TensorDict serialization, model-weight transport or checkpoint formats. The
+NumPy path requires CPU tensors, as provided by the usual worker output path.
+
+The launcher passes the selected method and `PYTHONFAULTHANDLER` (default `1`)
+to Ray workers explicitly. Synchronize the recipe and restart the affected job's
+workers before comparing runs. A crash persisting with NumPy needs the Python
+faulthandler stack or a core backtrace to identify the actual caller. Do not
+interpret the CRC32 frame alone as proof that the CRC implementation is faulty.
+
+## Runtime policy alignment
+
+RL uses the cropped MOPD memory policy: `optimizer_cpu_offload=True`,
+`optimizer_offload_fraction=1`, `overlap_cpu_optimizer_d2h_h2d=False` and
+`use_precision_aware_optimizer=False`. These are Core optimizer options, distinct
+from verl's phase-level `megatron.optimizer_offload`. Override them through
+`OPTIMIZER_CPU_OFFLOAD`, `OPTIMIZER_OFFLOAD_FRACTION`,
+`OVERLAP_CPU_OPTIMIZER_D2H_H2D` and `USE_PRECISION_AWARE_OPTIMIZER`.
+The selected Core/MindSpeed CPU optimizer path still requires NPU verification.
+
+`SEQUENCE_PARALLEL` defaults to `True`, matching MoE training with TP greater
+than one. For TP=1, set it to `False` if required by the selected Core config.
+Allocator, HCCL and thread settings are passed to all Ray workers explicitly.
+RL retains HCCL buffer defaults 200/200 MiB; the MOPD smoke profile retains its
+512/256 MiB policy. Configure them for the actual topology rather than assuming
+that a multi-node placement has the same memory cost as a one-node smoke test.
+
+The full-vocabulary KL, TQ artifact transport/cleanup, hidden export, teacher
+sleep controller and rack placement implementations are retained in the K26
+source patch. Source equivalence does not validate a different Core, Bridge or
+vLLM runtime. Two-layer checkpoints and public-runtime compatibility patches
+remain intentional adaptations. NumPy DataProto serialization remains opt-in
+for diagnosis; the default protocol matches the upstream/reference implementation.
+
+## Isolating checkpoint serialization failures
+
+`SAVE_FREQ=-1` succeeding while the default save fails isolates a save-dependent
+failure. `CHECKPOINT_SAVE_CONTENTS='[model]'` saves only the model;
+`'[optimizer,extra]'` isolates optimizer/RNG/scheduler state. The default remains
+`'[model,optimizer,extra]'`. `CHECKPOINT_LOAD_CONTENTS` remains the full resume
+set by default; partial diagnostic checkpoints cannot restore full training state.
+RL explicitly uses synchronous checkpoint saves.
+
+For missing Python stacks in a native serialization crash, apply the opt-in
+`patches/verl/k26-checkpoint-trace.patch` after the normal K26 source patches and
+restart workers. `K26_CHECKPOINT_TRACE=1` then logs each torch.save call made during
+save_checkpoint, including its Python caller and bounded tensor shape/dtype/device
+metadata. It logs no tensor values and leaves CRC32 and the payload unchanged.
+The trace requires synchronous save and restores torch.save on return/error.
+It is diagnostic instrumentation, not a checkpoint correctness fix.
