@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install all shared V4/V4.1 dependencies and build native operators.
-set -eo pipefail
+set -Eeo pipefail
+trap 'status=$?; printf "build-runtime.sh failed at line %s (exit %s)\n" "$LINENO" "$status" >&2' ERR
 ROOT=/opt/ascend-training
 SOURCES=$ROOT/third_party
 INPUT=/tmp/ascend-image-build/locks
@@ -68,7 +69,8 @@ for name in MindSpeed MindSpeed-LLM mbridge verl; do
     "$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$SOURCES/$name"
 done
 # Check editable installs and training-source integrity before emitting a receipt.
-"$PYTHON_BIN" -I - <<'PY_SOURCES'
+echo '[verify] Checking training-source integrity and editable installations'
+"$PYTHON_BIN" -u -I - <<'PY_SOURCES'
 import importlib.util
 import subprocess
 import sys
@@ -80,15 +82,19 @@ root = Path('/opt/ascend-training/third_party')
 packages = {'MindSpeed': 'mindspeed', 'MindSpeed-LLM': 'mindspeed_llm', 'mbridge': 'mbridge', 'verl': 'verl'}
 for name, source in image_sources(Path('/tmp/ascend-image-build'))[1].items():
     checkout = root / name
+    print(f"[verify] {name}: checking source inventory at {checkout}", flush=True)
     verify(checkout, source, tracked=True)
     actual = source_commit(checkout)
     assert actual == source['commit'], (name, actual)
+    print(f"[verify] {name}: locating Python package {packages[name]}", flush=True)
     spec = importlib.util.find_spec(packages[name])
     if spec is None or spec.origin is None or not Path(spec.origin).resolve().is_relative_to(checkout):
         raise RuntimeError(f'Editable installation does not resolve to {checkout}: {spec}')
+    print(f"[verify] {name}: passed", flush=True)
 PY_SOURCES
 # Fail on dependency drift even when a stale hash lock or no-deps mode is used.
-"$PYTHON_BIN" -I - <<'PY_DATASETS'
+echo '[verify] Checking runtime dependency versions and dataset imports'
+"$PYTHON_BIN" -u -I - <<'PY_DATASETS'
 from importlib.metadata import version
 
 expected = {"datasets": "5.0.1", "pyarrow": "24.0.0", "numpy": "1.26.4"}
@@ -111,7 +117,9 @@ for line in Path("/tmp/ascend-image-build/locks/validated-runtime-constraints.tx
         mismatches.append(f"{name}: expected {wanted}, got {installed}")
 if mismatches:
     raise RuntimeError("Validated runtime version drift:\n" + "\n".join(mismatches))
+print('[verify] Importing datasets', flush=True)
 import datasets
+print('[verify] Importing pyarrow', flush=True)
 import pyarrow
 
 print(f"Dataset imports verified: {actual}")
@@ -121,7 +129,8 @@ if ! "$PYTHON_BIN" -m pip check; then
     echo 'Dependency metadata conflicts reported above; continuing with the fixed deployment versions.' >&2
 fi
 mkdir -p "$ROOT/manifest"
-"$PYTHON_BIN" -I /tmp/ascend-image-build/collect_environment.py > "$ROOT/manifest/runtime-environment.json"
+echo '[verify] Recording runtime environment'
+"$PYTHON_BIN" -u -I /tmp/ascend-image-build/collect_environment.py > "$ROOT/manifest/runtime-environment.json"
 "$PYTHON_BIN" - <<'PY'
 import json
 import subprocess
@@ -150,7 +159,8 @@ receipt['source_root'] = '/opt/ascend-training/third_party'
 PY
 
 # Keep provenance and licenses; remove build-only inputs after successful validation.
-"$PYTHON_BIN" - <<'PY_CLEANUP'
+echo '[cleanup] Removing build-only materials'
+"$PYTHON_BIN" -u - <<'PY_CLEANUP'
 import json
 import shutil
 from pathlib import Path

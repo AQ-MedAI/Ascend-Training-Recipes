@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Four-layer, two-teacher full-vocabulary MOPD smoke test on one 16-NPU node.
+# Two-layer, two-teacher full-vocabulary MOPD smoke test on one 16-NPU node.
 # The student pool uses eight NPUs and the two teacher replicas use eight NPUs.
 # Prepopulate remote model code in the shared HF_HOME cache for offline workers.
 # Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
@@ -30,12 +30,20 @@ export NUMEXPR_NUM_THREADS=1
 # disjoint: NGPUS_PER_NODE + TEACHER_WORLD_SIZE must not exceed this list.
 export ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
 
-VERL_ROOT=${VERL_ROOT:-/path/to/verl}
+export PYTHON_BIN="${PYTHON_BIN:-python3}"
+export MODEL_PATH="${MODEL_PATH:-${CUT_MODEL_PATH:-${TMPDIR:-/tmp}/kimi_k26_bf16_2layers_model}}"
+export FULL_MODEL_PATH="${FULL_MODEL_PATH:-/path/to/kimi-k2.6-bf16}"
+PREPARE_ARGS=(--output-path "$MODEL_PATH" --num-layers 2)
+if [[ -n "${FULL_MODEL_PATH:-}" ]]; then
+    PREPARE_ARGS+=(--input-path "$FULL_MODEL_PATH")
+fi
+"$PYTHON_BIN" "$K26_SCRIPT_DIR/prepare_kimi_k26_cut_model.py" "${PREPARE_ARGS[@]}"
+VERL_ROOT=${VERL_ROOT:-$(cd "$K26_SCRIPT_DIR/../.." && pwd)/third_party/verl}
 cd "${VERL_ROOT}"
 export PYTHONPATH="${VERL_ROOT}:${PYTHONPATH:-}"
 
 # ---- user-adjustable ----
-HF_MODEL_PATH=/path/to/kimi_k26_bf16_4layers
+HF_MODEL_PATH="$MODEL_PATH"
 STUDENT_MODEL=${HF_MODEL_PATH}
 # Smoke-test teachers reuse the cropped model. Replacement teachers must share
 # the student's tokenizer and vocabulary so full-vocabulary log-probs align.

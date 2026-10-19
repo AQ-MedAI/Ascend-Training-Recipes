@@ -64,7 +64,7 @@ def validate(root, count):
                 raise ValueError(f"Index references missing tensors in {filename}")
 
 
-def prepare(src, dst, count=4):
+def prepare(src, dst, count=2):
     if count < 1:
         raise ValueError("num-layers must be positive")
     dst = dst.absolute()
@@ -146,7 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input-path", type=Path)
     parser.add_argument("--output-path", type=Path, required=True)
-    parser.add_argument("--num-layers", type=int, default=4)
+    parser.add_argument("--num-layers", type=int, default=2)
     args = parser.parse_args()
     prepare(args.input_path, args.output_path, args.num_layers)
 

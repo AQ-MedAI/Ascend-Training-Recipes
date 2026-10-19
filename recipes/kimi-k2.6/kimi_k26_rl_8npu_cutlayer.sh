@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Four-layer GRPO smoke test: one node, eight NPUs, two optimizer steps.
-# Create the four-layer checkpoint on first use; validate and reuse it afterwards.
+# Two-layer GRPO smoke test: one node, eight NPUs, two optimizer steps.
+# Create the two-layer checkpoint on first use; validate and reuse it afterwards.
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHON_BIN="${PYTHON_BIN:-python3}"
-export MODEL_PATH="${MODEL_PATH:-${CUT_MODEL_PATH:-${TMPDIR:-/tmp}/kimi_k26_bf16_4layers_model}}"
+export MODEL_PATH="${MODEL_PATH:-${CUT_MODEL_PATH:-${TMPDIR:-/tmp}/kimi_k26_bf16_2layers_model}}"
 export FULL_MODEL_PATH="${FULL_MODEL_PATH:-/path/to/kimi-k2.6-bf16}"
 if (( $# != 0 )); then
     echo 'This smoke entry does not accept Hydra overrides; use environment variables for paths.' >&2
     exit 2
 fi
-PREPARE_ARGS=(--output-path "$MODEL_PATH" --num-layers 4)
+PREPARE_ARGS=(--output-path "$MODEL_PATH" --num-layers 2)
 if [[ -n "${FULL_MODEL_PATH:-}" ]]; then
     PREPARE_ARGS+=(--input-path "$FULL_MODEL_PATH")
 fi
@@ -27,7 +27,7 @@ export ROLLOUT_MAX_NUM_SEQS=8 ROLLOUT_MAX_NUM_BATCHED_TOKENS=4096
 export TOTAL_TRAINING_STEPS=2 TOTAL_EPOCHS=1 SAVE_FREQ=1 TEST_FREQ=-1
 export LR_WARMUP_STEPS_RATIO=0
 export LOGGER='["console"]' WITH_TRACKING=false
-export EXP_NAME="${EXP_NAME:-kimi_k26_rl_4layers_smoke}"
+export EXP_NAME="${EXP_NAME:-kimi_k26_rl_2layers_smoke}"
 export HCCL_NPU_SOCKET_PORT_RANGE="${HCCL_NPU_SOCKET_PORT_RANGE:-auto}"
 export HCCL_HOST_SOCKET_PORT_RANGE="${HCCL_HOST_SOCKET_PORT_RANGE:-auto}"
 exec bash "$SCRIPT_DIR/kimi_k26_rl.sh" \

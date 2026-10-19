@@ -19,6 +19,10 @@ spec.loader.exec_module(layout)
 
 class PipelineLayoutTest(unittest.TestCase):
     def test_cut_model_uses_even_pipeline_split(self):
+        self.assertEqual(layout.resolve_layout(2, 1), (None, None))
+        self.assertEqual(layout.resolve_layout(2, 2), (None, None))
+        with self.assertRaises(ValueError):
+            layout.resolve_layout(2, 4)
         self.assertEqual(layout.resolve_layout(4, 2), (None, None))
         self.assertEqual(layout.resolve_layout(4, 1), (None, None))
         self.assertEqual(layout.resolve_layout(4, 2, '2', '2'), (2, 2))
