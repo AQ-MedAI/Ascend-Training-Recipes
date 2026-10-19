@@ -38,7 +38,13 @@ def check_runtime_contracts():
             {"use_inner_quantization_context", "padding_mask"},
         ),
     ]
+    from megatron.bridge.models.hf_pretrained import state as hf_state
+
     failures = []
+    if not callable(getattr(hf_state, "_save_safetensors_sequential", None)):
+        failures.append(
+            "Bridge shared-filesystem writer: apply patches/megatron-bridge/ascend-shared-fs-safetensors.patch"
+        )
     import os
 
     if os.getenv("ASCEND_CHECKPOINT_WRITER") == "inprocess":

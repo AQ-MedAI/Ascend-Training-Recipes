@@ -158,3 +158,31 @@ lacking ops, and check explicit fused-LoRA rejection. Backend communication and
 fused kernels are not exercised by these CPU checks.
 
 Optional PEFT scan patch SHA-256: `ee5cb32a243cfa0d1927890d1aa3308d7744b4d73f4af40947ec062f0882ea75`.
+
+
+## Shared-filesystem safetensors export
+
+`ascend-shared-fs-safetensors.patch` applies the same write policy as the
+V4/V4.1 AQ mbridge adapter: serialize each shard with `safetensors.torch.save`,
+then write the bytes through an ordinary buffered file in 16 MiB chunks. All
+five save sites in the pinned Bridge state exporter use this helper, covering
+single-file, sharded and distributed export. It preserves safetensors data and
+metadata without calling the Rust file writer or requiring node-local temporary
+storage. It needs additional host RAM approximately equal to one serialized
+shard and does not make multi-shard checkpoint publication atomic.
+
+The observed shared-filesystem `Operation not supported` came from native
+safetensors file serialization. The exact unsupported syscall was not traced;
+this adapter avoids that native path rather than claiming a specific syscall
+failed. Ordinary filesystem writes must still be supported, and write failures
+propagate to the caller.
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C /opt/ascend-training/Megatron-Bridge apply --check "$PWD/patches/megatron-bridge/ascend-shared-fs-safetensors.patch"
+git -C /opt/ascend-training/Megatron-Bridge apply "$PWD/patches/megatron-bridge/ascend-shared-fs-safetensors.patch"
+```
+
+Retain the earlier Bridge patches and restart workers. CPU tests cover FP32/BF16
+round trips and metadata, bypass of save_file, and propagation of write errors.
+Actual multi-rank export and resume on the shared filesystem remain to be tested.

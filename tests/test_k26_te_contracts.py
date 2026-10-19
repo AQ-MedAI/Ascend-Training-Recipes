@@ -234,6 +234,7 @@ class TeContractsTest(unittest.TestCase):
         for name in ('rope_utils', 'rotary_pos_embedding', 'yarn_rotary_pos_embedding',
                      'rotary_pos_embedding_utils', 'attention', 'multi_latent_attention'):
             ns[name] = rope_api
+        ns['hf_state'] = SimpleNamespace(_save_safetensors_sequential=lambda *args: None)
         self.assertEqual(ns['check_runtime_contracts'](), 16)
         # Catch a stale MLA-local import even if rope_utils was updated.
         ns['multi_latent_attention'] = SimpleNamespace(apply_rotary_pos_emb=lambda *args: None)

@@ -211,3 +211,10 @@ The startup checker requires the patched writer when this mode is enabled.
 `ASCEND_CHECKPOINT_WRITER=multiprocess` is available only for comparison with the
 previous Core path. A successful save should print `[checkpoint-writer] ... mode=inprocess`.
 CPU tests cover FP32/BF16 round trips, multiple buckets and write-error propagation.
+
+
+For shared storage that rejects native safetensors file operations during HF
+export, apply [the Bridge sequential-write patch](../../patches/megatron-bridge/README.md#shared-filesystem-safetensors-export).
+This matches the V4/V4.1 mbridge policy and keeps the configured output directory.
+It requires host RAM for an additional serialized shard; complete save/resume
+must be checked on the target filesystem.

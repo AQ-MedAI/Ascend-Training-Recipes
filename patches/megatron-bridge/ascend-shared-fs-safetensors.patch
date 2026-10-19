@@ -1,0 +1,49 @@
+--- a/src/megatron/bridge/models/hf_pretrained/state.py
++++ b/src/megatron/bridge/models/hf_pretrained/state.py
+@@ -37,6 +37,28 @@
+ 
+ 
+ logger = logging.getLogger(__name__)
++
++
++def _save_safetensors_sequential(tensors, filename, metadata=None):
++    """Match the Ascend mbridge shared-filesystem writer without native file I/O.
++
++    Keep the safetensors format, but serialize one shard to bytes and write it
++    sequentially. This needs host RAM for the serialized shard in addition to
++    the source tensors. No local temporary file or filesystem preallocation is used.
++    """
++    from safetensors.torch import save as serialize
++
++    serialized = serialize(tensors, metadata=metadata)
++    serialized_view = memoryview(serialized)
++    try:
++        chunk_size = 16 * 1024 * 1024
++        with open(filename, "wb") as destination:
++            for offset in range(0, len(serialized_view), chunk_size):
++                destination.write(serialized_view[offset : offset + chunk_size])
++    finally:
++        serialized_view.release()
++        del serialized_view
++        del serialized
+ 
+ 
+ class StateDict(Mapping[str, torch.Tensor]):
+@@ -724,7 +746,7 @@
+             return
+ 
+         # Rank 0 proceeds with saving.
+-        from safetensors.torch import save_file
++        save_file = _save_safetensors_sequential
+ 
+         output_path = Path(output_path)
+         output_path.mkdir(parents=True, exist_ok=True)
+@@ -882,7 +904,7 @@
+             world_size = 1
+             rank = 0
+ 
+-        from safetensors.torch import save_file
++        save_file = _save_safetensors_sequential
+ 
+         output_path = Path(output_path)
+ 
