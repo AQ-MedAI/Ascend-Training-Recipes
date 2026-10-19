@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -79,11 +80,20 @@ class PipelineLayoutTest(unittest.TestCase):
         script = (RECIPE / 'kimi_k26_rl_8npu_cutlayer.sh').read_text()
         lines = [line for line in script.splitlines() if line.startswith('export ACTOR_') or line.startswith('export LOG_PROB_MAX_TOKEN')]
         harness = 'set -euo pipefail\nMAX_PROMPT_LENGTH=8192\nMAX_RESPONSE_LENGTH=1\n'
-        harness += 'ACTOR_TP=2\nACTOR_PP=2\nACTOR_CP=2\nACTOR_EP=4\nACTOR_ETP=1\n'
         harness += '\n'.join(lines) + '\nprintf "%s " "$ACTOR_TP" "$ACTOR_PP" "$ACTOR_CP" "$ACTOR_EP" "$ACTOR_ETP" "$ACTOR_MAX_TOKEN_LEN_PER_GPU" "$LOG_PROB_MAX_TOKEN_LEN_PER_GPU"\n'
-        result = subprocess.run(['bash', '-c', harness], capture_output=True, text=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), '2 2 2 4 1 8193 8193')
+        cases = [
+            ({}, '4 1 2 8 1 8193 8193'),
+            ({'ACTOR_TP': '2', 'ACTOR_PP': '2', 'ACTOR_CP': '2',
+              'ACTOR_EP': '4', 'ACTOR_ETP': '1'}, '2 2 2 4 1 8193 8193'),
+        ]
+        for overrides, expected in cases:
+            with self.subTest(overrides=overrides):
+                result = subprocess.run(
+                    ['bash', '-c', harness], env={'PATH': os.environ['PATH'], **overrides},
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
 
 
 if __name__ == '__main__':

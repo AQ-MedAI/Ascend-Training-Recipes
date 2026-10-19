@@ -71,7 +71,7 @@ LR="${LR:-5.0e-7}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-1.0e-2}"
 CLIP_GRAD="${CLIP_GRAD:-1.0}"
 OPTIMIZER="${OPTIMIZER:-adam}"
-# Match the validated cropped MOPD optimizer policy; phase offload alone is insufficient.
+# Offload optimizer states to CPU in addition to phase-level offload.
 OPTIMIZER_CPU_OFFLOAD="${OPTIMIZER_CPU_OFFLOAD:-True}"
 OPTIMIZER_OFFLOAD_FRACTION="${OPTIMIZER_OFFLOAD_FRACTION:-1}"
 OVERLAP_CPU_OPTIMIZER_D2H_H2D="${OVERLAP_CPU_OPTIMIZER_D2H_H2D:-False}"
@@ -102,7 +102,6 @@ SEED="${SEED:-42}"
 SAVE_FREQ="${SAVE_FREQ:-10}"
 CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[model,optimizer,extra]}"
 CHECKPOINT_LOAD_CONTENTS="${CHECKPOINT_LOAD_CONTENTS:-[model,optimizer,extra]}"
-export K26_CHECKPOINT_TRACE="${K26_CHECKPOINT_TRACE:-0}"
 export ASCEND_CHECKPOINT_WRITER="${ASCEND_CHECKPOINT_WRITER:-inprocess}"
 case "$ASCEND_CHECKPOINT_WRITER" in
     inprocess|multiprocess) ;;
@@ -121,12 +120,6 @@ WANDB_DIR="${WANDB_DIR:-${OUTPUT_DIR%/}/wandb}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 TENSORBOARD_DIR="${TENSORBOARD_DIR:-/path/to/tensorboard}"
 export TRANSFORMERS_VERBOSITY="${TRANSFORMERS_VERBOSITY:-error}"
-# DataProto serialization is independent of checkpoint save frequency.
-export VERL_DATAPROTO_SERIALIZATION_METHOD="${VERL_DATAPROTO_SERIALIZATION_METHOD:-torch}"
-case "$VERL_DATAPROTO_SERIALIZATION_METHOD" in
-    torch|numpy) ;;
-    *) echo 'VERL_DATAPROTO_SERIALIZATION_METHOD must be torch or numpy' >&2; exit 2 ;;
-esac
 export PYTHONFAULTHANDLER="${PYTHONFAULTHANDLER:-1}"
 if [[ -z "${LOGGER:-}" ]]; then
     if [[ "${WITH_TRACKING}" == "true" ]]; then
@@ -324,10 +317,8 @@ EXTRA=(
     +ray_kwargs.ray_init.runtime_env.env_vars.MKL_NUM_THREADS="'${MKL_NUM_THREADS}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.NUMEXPR_NUM_THREADS="'${NUMEXPR_NUM_THREADS}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.VERL_DATAPROTO_SERIALIZATION_METHOD="'${VERL_DATAPROTO_SERIALIZATION_METHOD}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONFAULTHANDLER="'${PYTHONFAULTHANDLER}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_LAUNCH_BLOCKING="'${ASCEND_LAUNCH_BLOCKING}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.K26_CHECKPOINT_TRACE="'${K26_CHECKPOINT_TRACE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER="'${ASCEND_CHECKPOINT_WRITER}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
