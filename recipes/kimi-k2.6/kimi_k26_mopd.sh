@@ -4,6 +4,7 @@
 # Prepopulate remote model code in the shared HF_HOME cache for offline workers.
 # Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
 set -xeuo pipefail
+K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 #export HF_HOME=${HF_HOME:-/path/to/hf_cache}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
@@ -89,7 +90,7 @@ save_freq=${SAVE_FREQ:-100}
 test_freq=${TEST_FREQ:-50}
 project_name=${PROJECT_NAME:-verl_distill_mopd_full}
 experiment_name=${EXPERIMENT_NAME:-k26_full_mopd_2teacher_fullvocab}
-reward_fn_path=${REWARD_FN_PATH:-/path/to/orz_math_service_reward.py}
+reward_fn_path="${REWARD_FN_PATH:-${K26_SCRIPT_DIR}/math_dapo_reward.py}"
 
 # Dataset A: gsm8k  (data_source = "openai/gsm8k") -> teacher gsm8k
 gsm8k_train=/path/to/train.parquet

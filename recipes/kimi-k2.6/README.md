@@ -122,6 +122,20 @@ Configure the data, reward and cache paths in the launcher before running:
 bash recipes/kimi-k2.6/kimi_k26_mopd_16npu_cutlayer.sh
 ```
 
+Both MOPD launchers default to [math_dapo_reward.py](math_dapo_reward.py), which
+calls verl's DAPO math scorer: correct answers receive `1`, incorrect answers `-1`.
+Provide the final reference answer in `reward_model.ground_truth`. By default,
+responses must contain `Answer: ...` near the end. For boxed answers, append
+`+reward.custom_reward_function.reward_kwargs.strict_box_verify=True` to the
+launcher command. This scorer applies to every sample, independently of teacher
+routing; code or mixed-task datasets require a suitable `REWARD_FN_PATH` override.
+The reward file must be readable at the same absolute path on every worker.
+
+```bash
+REWARD_FN_PATH="$PWD/recipes/kimi-k2.6/math_dapo_reward.py" \
+bash recipes/kimi-k2.6/kimi_k26_mopd_16npu_cutlayer.sh
+```
+
 Override student parallelism with `ACTOR_*`. Legacy `TP`, `PP`, `CP`, `EP` and `ETP`
 variables remain supported, with `ACTOR_*` taking precedence. Actor and log-prob
 budgets cover the complete sequence before CP partitioning and accept

@@ -118,10 +118,10 @@ test_freq=${TEST_FREQ:--1}
 project_name=${PROJECT_NAME:-verl_distill_mopd_gsm8k_mbpp}
 experiment_name=${EXPERIMENT_NAME:-k26_2teacher_mopd}
 
-# Custom reward (now IN THE LOSS via use_task_rewards=True): gsm8k -> default answer check;
-# mbpp -> verl.utils.reward_score.mbpp (executes generated code vs test_list asserts).
-# reward_fn_path must be readable on the remote.
-reward_fn_path=${REWARD_FN_PATH:-/path/to/orz_math_service_reward.py}
+# Task reward uses DAPO math answer checking by default.
+# Override REWARD_FN_PATH for code or mixed-task datasets.
+# The reward file must be readable at the same path on every worker.
+reward_fn_path="${REWARD_FN_PATH:-${K26_SCRIPT_DIR}/math_dapo_reward.py}"
 # ---- end user-adjustable ----
 
 # Dataset A: gsm8k (data_source = openai/gsm8k) -> teacher gsm8k
@@ -328,7 +328,7 @@ EXTRA=(
     +distillation.teacher_models.math.inference.max_num_batched_tokens=$((max_prompt_length + max_response_length + 1))
     # --- loss: task-reward RL + distillation regularizer ---
     # L = policy_loss(task correctness) + distillation_loss_coef * distill_loss(k1)
-    # task reward (gsm8k answer / mbpp code) is the main driver; distill keeps student
+    # Task reward is the main driver; distillation keeps the student
     # near teacher. k1 + use_policy_gradient=True (PG OPD); clamp=2 caps distill advantage.
     distillation.distillation_loss.loss_mode=${distillation_loss_mode}
     distillation.distillation_loss.full_vocab_chunk_tokens=${full_vocab_chunk_tokens}
