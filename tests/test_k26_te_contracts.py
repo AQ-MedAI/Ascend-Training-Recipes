@@ -227,7 +227,19 @@ class TeContractsTest(unittest.TestCase):
                   initialize_model_parallel_cp_wrapper=lambda fn: fn,
                   TESpecProvider=lambda: SimpleNamespace(linear=lambda: column))
         exec(compile(ast.Module(body=[fn], type_ignores=[]), '<actual startup checker>', 'exec'), ns)
-        self.assertEqual(ns['check_runtime_contracts'](), 9)
+        def rope(*args, cp_group=None):
+            pass
+        rope_api = SimpleNamespace(apply_rotary_pos_emb=rope, _apply_rotary_pos_emb_thd=rope,
+                                   get_pos_emb_on_this_cp_rank=rope)
+        for name in ('rope_utils', 'rotary_pos_embedding', 'yarn_rotary_pos_embedding',
+                     'rotary_pos_embedding_utils', 'attention', 'multi_latent_attention'):
+            ns[name] = rope_api
+        self.assertEqual(ns['check_runtime_contracts'](), 16)
+        # Catch a stale MLA-local import even if rope_utils was updated.
+        ns['multi_latent_attention'] = SimpleNamespace(apply_rotary_pos_emb=lambda *args: None)
+        with self.assertRaisesRegex(RuntimeError, 'MLA RoPE reference.*cp_group'):
+            ns['check_runtime_contracts']()
+        ns['multi_latent_attention'] = rope_api
         def old(self, **kwargs):
             pass
         def old_adam(params):

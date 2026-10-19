@@ -306,3 +306,26 @@ git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-vocab-embe
 
 CPU tests cover explicit TP masking, gradients, sequence scatter/group forwarding,
 and the legacy TP1 path. They do not execute HCCL collectives.
+
+
+## Applying RoPE with explicit context groups
+
+`ascend-rope-apply-cp-group.patch` fixes a different interface from the earlier
+`ascend-rope-cp-group.patch`: the fused-feature replacement for
+`rope_utils.apply_rotary_pos_emb` must accept Core's `cp_group` keyword.
+Keep both increments. The apply adapter forwards the group into Core's THD
+implementation, preserving rank-specific packed frequency slicing. Calls without
+an explicit group resolve the existing default CP group. Non-packed execution
+keeps its existing behavior. Packed execution uses Core's THD path instead of the
+legacy fused THD entry, which has no explicit process-group contract; Core still
+calls the configured MindSpeed BSHD rotary implementation for the actual rotation.
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-rope-apply-cp-group.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-rope-apply-cp-group.patch"
+```
+
+Restart the training driver and workers. The runtime checker now validates both
+RoPE application signatures before Ray startup. CPU regressions verify group
+forwarding and packed position selection; NPU execution remains to be validated.

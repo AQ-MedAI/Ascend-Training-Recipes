@@ -12,13 +12,18 @@ def check_runtime_contracts():
     from megatron.core import parallel_state as mpu
     from megatron.core.extensions import transformer_engine as te
     from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
-    from megatron.core.models.common.embeddings import rotary_pos_embedding, yarn_rotary_pos_embedding
+    from megatron.core.models.common.embeddings import rope_utils, rotary_pos_embedding, yarn_rotary_pos_embedding
     from megatron.core.tensor_parallel.layers import ColumnParallelLinear
+    from megatron.core.transformer import attention, multi_latent_attention
     from megatron.core.transformer.transformer_block import TransformerBlock
     from mindspeed.core.context_parallel import rotary_pos_embedding_utils
     from mindspeed.core.context_parallel.model_parallel_utils import initialize_model_parallel_cp_wrapper
 
     targets = [
+        ("MLA RoPE reference", multi_latent_attention.apply_rotary_pos_emb, {"cp_group"}),
+        ("Attention RoPE reference", attention.apply_rotary_pos_emb, {"cp_group"}),
+        ("Core apply RoPE", rope_utils.apply_rotary_pos_emb, {"cp_group"}),
+        ("Core packed RoPE", rope_utils._apply_rotary_pos_emb_thd, {"cp_group"}),
         ("MindSpeed CP RoPE", rotary_pos_embedding_utils.get_pos_emb_on_this_cp_rank, {"cp_group"}),
         ("Core RoPE CP", rotary_pos_embedding.get_pos_emb_on_this_cp_rank, {"cp_group"}),
         ("Core YaRN CP", yarn_rotary_pos_embedding.get_pos_emb_on_this_cp_rank, {"cp_group"}),

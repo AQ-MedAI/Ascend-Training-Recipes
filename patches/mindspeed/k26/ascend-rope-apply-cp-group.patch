@@ -1,0 +1,44 @@
+--- a/mindspeed/core/fusions/fused_rope.py
++++ b/mindspeed/core/fusions/fused_rope.py
+@@ -91,7 +91,8 @@
+ 
+ 
+ def apply_rotary_pos_emb(
+-    t: Tensor, freqs: Tensor, config: TransformerConfig, cu_seqlens: Optional[Tensor] = None, mscale: float = 1.0
++    t: Tensor, freqs: Tensor, config: TransformerConfig, cu_seqlens: Optional[Tensor] = None,
++    mscale: float = 1.0, cp_group=None
+ ):
+     """
+     Old version for fix rotary_pos_emb in core_r0.10.0.
+@@ -109,10 +110,10 @@
+                 " is not included in Apex. Try upgrading to the latest version"
+             )
+             apply_rotary_pos_emb.printed_fused_warning = True
+-    if config.apply_rope_fusion:
+-        if cu_seqlens is None:
+-            return fused_apply_rotary_pos_emb(t, freqs, transpose_output_memory=True)
+-        return fused_apply_rotary_pos_emb_thd(t, cu_seqlens, freqs)
++    # The legacy fused THD kernel does not implement the explicit CP-group contract.
++    # Use Core's packed implementation, which forwards to the NPU BSHD adapter.
++    if config.apply_rope_fusion and cu_seqlens is None:
++        return fused_apply_rotary_pos_emb(t, freqs, transpose_output_memory=True)
+     elif cu_seqlens is None:
+         return ru._apply_rotary_pos_emb_bshd(
+             t,
+@@ -120,11 +121,15 @@
+             rotary_interleaved=config.rotary_interleaved,
+             multi_latent_attention=config.multi_latent_attention,
+             mscale=mscale)
++    if cp_group is None:
++        from megatron.core import parallel_state
++        cp_group = parallel_state.get_context_parallel_group()
+     return ru._apply_rotary_pos_emb_thd(
+         t,
+         cu_seqlens,
+         freqs,
+         rotary_interleaved=config.rotary_interleaved,
+         multi_latent_attention=config.multi_latent_attention,
+-        mscale=mscale
++        mscale=mscale,
++        cp_group=cp_group
+     )
