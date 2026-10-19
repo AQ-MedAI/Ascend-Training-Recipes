@@ -33,7 +33,7 @@ def patch_specs(source):
     return result
 
 
-def verify(root, source, *, tracked=False):
+def verify(root, source, *, tracked=False, generated_files=()):
     ignored = {".git", "__pycache__", ".DS_Store", ".pytest_cache", ".mypy_cache", ".ruff_cache"}
     actual_names = {
         str(p.relative_to(root))
@@ -65,8 +65,14 @@ def verify(root, source, *, tracked=False):
         actual_names = {
             name for name in actual_names if not any(name == link or name.startswith(link + "/") for link in gitlinks)
         }
+    generated = set(generated_files)
+    if generated.intersection(source["files"]):
+        raise ValueError("Generated files must not mask manifest source files")
+    actual_names -= generated
     if actual_names != set(source["files"]):
-        raise RuntimeError(f"Source inventory mismatch: {root}")
+        missing = sorted(set(source["files"]) - actual_names)
+        extra = sorted(actual_names - set(source["files"]))
+        raise RuntimeError(f"Source inventory mismatch: {root}; missing={missing[:30]}, extra={extra[:30]}")
     for name, expected in source["files"].items():
         path = root / name
         if expected.get("kind") == "symlink":

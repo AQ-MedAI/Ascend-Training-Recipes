@@ -15,6 +15,7 @@ patches/**/legacy/**
 !docker/v41/
 !docker/v41/Dockerfile
 !docker/v41/build-runtime.sh
+!docker/v41/verify-runtime.sh
 !docker/v41/install_python.sh
 !docker/v41/entrypoint.sh
 !docker/v41/collect_environment.py

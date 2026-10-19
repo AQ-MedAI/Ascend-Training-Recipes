@@ -82,7 +82,10 @@ COPY docker/v41/build-runtime.sh docker/v41/collect_environment.py docker/v41/do
 RUN --mount=type=cache,target=/root/.cache/ascend-training-recipes \
     --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/uv \
-    PIP_CACHE_DIR=/root/.cache/pip UV_CACHE_DIR=/root/.cache/uv MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" PYTHON_DEPENDENCY_MODE="${PYTHON_DEPENDENCY_MODE}" bash /tmp/ascend-image-build/build-runtime.sh
+    PIP_CACHE_DIR=/root/.cache/pip UV_CACHE_DIR=/root/.cache/uv MAX_JOBS="${MAX_JOBS}" DEPENDENCY_OFFLINE="${DEPENDENCY_OFFLINE}" PYTHON_DEPENDENCY_MODE="${PYTHON_DEPENDENCY_MODE}" BUILD_RUNTIME_PHASE=build bash /tmp/ascend-image-build/build-runtime.sh
+# Copy validation separately so validation-only changes preserve compiled dependencies.
+COPY docker/v41/verify-runtime.sh /tmp/ascend-image-build/
+RUN bash /tmp/ascend-image-build/verify-runtime.sh
 
 # Training and rollout share Python dependencies; native loader settings remain role-specific.
 ENV VERL_ROOT=/opt/ascend-training/third_party/verl \
