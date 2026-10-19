@@ -218,3 +218,11 @@ export, apply [the Bridge sequential-write patch](../../patches/megatron-bridge/
 This matches the V4/V4.1 mbridge policy and keeps the configured output directory.
 It requires host RAM for an additional serialized shard; complete save/resume
 must be checked on the target filesystem.
+
+
+For asynchronous NPU errors (for example `aclnnMatmul` reported later during
+PP shape communication), set `ASCEND_LAUNCH_BLOCKING=1` for a diagnostic run.
+RL and MOPD smoke entries pass this variable to Ray workers explicitly. Keep the
+same topology and capture the first operator error plus its full Python stack.
+The default is `0`; synchronous launch is a diagnostic setting with a performance
+cost, not a fix for the operator failure.

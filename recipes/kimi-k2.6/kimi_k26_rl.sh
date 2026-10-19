@@ -12,6 +12,8 @@ export PYTHONPATH="$VERL_ROOT:${PYTHONPATH:-}"
 # ------------------------- Environment -------------------------
 # NPU/HCCL defaults. Override from the shell when cluster settings differ.
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
+# Set to 1 only while locating asynchronous NPU operator failures.
+export ASCEND_LAUNCH_BLOCKING="${ASCEND_LAUNCH_BLOCKING:-0}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False}"
 export HCCL_BUFFSIZE="${HCCL_BUFFSIZE:-200}"
 export GROUP_HCCL_BUFFER_SIZE="${GROUP_HCCL_BUFFER_SIZE:-200}"
@@ -324,6 +326,7 @@ EXTRA=(
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_DATAPROTO_SERIALIZATION_METHOD="'${VERL_DATAPROTO_SERIALIZATION_METHOD}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONFAULTHANDLER="'${PYTHONFAULTHANDLER}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_LAUNCH_BLOCKING="'${ASCEND_LAUNCH_BLOCKING}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.K26_CHECKPOINT_TRACE="'${K26_CHECKPOINT_TRACE}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER="'${ASCEND_CHECKPOINT_WRITER}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
