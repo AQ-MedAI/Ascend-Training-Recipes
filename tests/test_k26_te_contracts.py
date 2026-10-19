@@ -215,13 +215,19 @@ class TeContractsTest(unittest.TestCase):
             TERowParallelGroupedLinear=SimpleNamespace(__init__=attention))
         block = SimpleNamespace(forward=forward, _checkpointed_forward=checkpoint)
         column = object()
+        def initialize_model_parallel(tensor_model_parallel_size=1, pipeline_model_parallel_size=1,
+            context_parallel_size=1, expert_model_parallel_size=1, expert_tensor_parallel_size=None,
+            use_sharp=False, sharp_enabled_group=None, create_gloo_process_groups=True):
+            pass
         def adam(params, adam_w_mode=True):
             pass
         ns = dict(inspect=inspect, te=te, TransformerBlock=block, ColumnParallelLinear=column,
                   optimizer_module=SimpleNamespace(USING_PYTORCH_OPTIMIZER=False, Adam=adam),
+                  mpu=SimpleNamespace(initialize_model_parallel=initialize_model_parallel),
+                  initialize_model_parallel_cp_wrapper=lambda fn: fn,
                   TESpecProvider=lambda: SimpleNamespace(linear=lambda: column))
         exec(compile(ast.Module(body=[fn], type_ignores=[]), '<actual startup checker>', 'exec'), ns)
-        self.assertEqual(ns['check_runtime_contracts'](), 8)
+        self.assertEqual(ns['check_runtime_contracts'](), 9)
         def old(self, **kwargs):
             pass
         def old_adam(params):

@@ -160,7 +160,7 @@ git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-te-model-c
 ```
 
 The updated K26 `runtime_env.sh` runs `tools/check_k26_runtime_contracts.py`
-before Ray starts. It checks eight loaded interfaces and reports the actual source
+before Ray starts. It checks the loaded model and optimizer interfaces and reports the actual source
 file if an old adapter is still selected. This is an early interface check, not
 a model construction or numerical test; feature repatching inside workers still
 requires the distributed smoke test.
@@ -221,3 +221,48 @@ outside this patch's tested scope. NPU kernels and distributed optimizer steps
 still require the target-container smoke test.
 
 AdamW API patch SHA-256: `5ee3553ce9420bc4e6e7f716777c68bb29f384bcd70344387eea0a732de7db55`.
+
+
+## Context-parallel initialization against the K26 Core signature
+
+`ascend-cp-initialization.patch` replaces the CP wrapper's hand-maintained
+positional argument list with binding against the actual wrapped Core signature.
+The old list included removed split/encoder parameters and omitted new fields;
+its final `create_gloo_process_groups=True` landed in `sharp_enabled_group`,
+causing a misleading SHARP assertion with `use_sharp=False`. Other options,
+including CP size, were also shifted.
+
+The wrapper now validates and forwards arguments using the native signature,
+preserves new options and defaults, and uses those bound values when creating
+MindSpeed's extra CP groups. Core validation remains active, and unknown options
+still raise. No SHARP setting is enabled to work around the error.
+
+The increment also forwards explicit process groups through the CP attention
+constructor and non-TE attention/MLA wrappers, selecting explicit CP for Ulysses
+when present. Keep earlier MLA process-group patches applied.
+
+For eight ranks, TP=2, PP=2, CP=2 gives attention DP=1. ETP=1, EP=4, PP=2 gives
+expert DP=1. The native RankGenerator produces identical pipeline groups for
+both decompositions: `[0,4]`, `[1,5]`, `[2,6]`, `[3,7]`. This establishes rank-layout
+consistency, not numerical compatibility of the CP/PP training implementation.
+
+Apply while retaining existing K26 patches:
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-cp-initialization.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-cp-initialization.patch"
+```
+
+The updated runtime checker probes argument forwarding without creating process
+groups: the probe captures the forwarded values and stops before any CP helper
+runs. Restart the driver and workers after synchronizing the updated checker.
+
+Regression checks reproduce the old SHARP error against the actual Core
+signature/SHARP validation, verify defaults and new options, compare native rank
+groups, and exercise CP constructor/wrapper process-group forwarding. These
+checks do not execute HCCL collectives, CP attention kernels, PP scheduling, or
+distributed checkpoint save/resume. The earlier PP=1/CP=1 smoke validation cannot
+be treated as validation of this new PP=2/CP=2 training mode.
+
+CP initialization patch SHA-256: `8e66104bd342256f214b1587b32cccd61bb8ca2010286954438e929d522b315c`.

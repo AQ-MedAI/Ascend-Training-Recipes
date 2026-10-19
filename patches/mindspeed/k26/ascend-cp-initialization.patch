@@ -1,0 +1,196 @@
+--- a/mindspeed/core/context_parallel/model_parallel_utils.py
++++ b/mindspeed/core/context_parallel/model_parallel_utils.py
+@@ -1,6 +1,7 @@
+ # Copyright (c) 2025, Huawei Technologies Co., Ltd. All rights reserved.
+ # Copyright (c) 2022-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ from functools import wraps
++from inspect import signature
+ from typing import Optional, Callable, List
+ import torch
+ from mindspeed.core.context_parallel import get_args, get_nccl_options
+@@ -221,75 +222,37 @@
+ 
+ 
+ def initialize_model_parallel_cp_wrapper(initialize_model_parallel):
++    core_signature = signature(initialize_model_parallel)
++
+     @wraps(initialize_model_parallel)
+-    def wrapper(
+-            tensor_model_parallel_size: int = 1,
+-            pipeline_model_parallel_size: int = 1,
+-            virtual_pipeline_model_parallel_size: Optional[int] = None,
+-            pipeline_model_parallel_split_rank: Optional[int] = None,
+-            pipeline_model_parallel_comm_backend: Optional[str] = None,
+-            use_sharp: bool = False,
+-            context_parallel_size: int = 1,
+-            hierarchical_context_parallel_sizes: Optional[List[int]] = None,
+-            expert_model_parallel_size: int = 1,
+-            num_distributed_optimizer_instances: int = 1,
+-            expert_tensor_parallel_size: Optional[int] = None,
+-            nccl_communicator_config_path: Optional[str] = None,
+-            distributed_timeout_minutes: int = 30,
+-            order: str = "tp-cp-ep-dp-pp",
+-            encoder_tensor_model_parallel_size: int = 0,
+-            encoder_pipeline_model_parallel_size: Optional[int] = 0,
+-            get_embedding_ranks: Optional[Callable[[List[int], Optional[int]], List[int]]] = None,
+-            get_position_embedding_ranks: Optional[Callable[[List[int], Optional[int]], List[int]]] = None,
+-            create_gloo_process_groups: bool = True
+-    ):
+-        initialize_model_parallel(
+-            tensor_model_parallel_size,
+-            pipeline_model_parallel_size,
+-            virtual_pipeline_model_parallel_size,
+-            pipeline_model_parallel_split_rank,
+-            pipeline_model_parallel_comm_backend,
+-            use_sharp,
+-            context_parallel_size,
+-            hierarchical_context_parallel_sizes,
+-            expert_model_parallel_size,
+-            num_distributed_optimizer_instances,
+-            expert_tensor_parallel_size,
+-            nccl_communicator_config_path,
+-            distributed_timeout_minutes,
+-            order,
+-            encoder_tensor_model_parallel_size,
+-            encoder_pipeline_model_parallel_size,
+-            get_embedding_ranks,
+-            get_position_embedding_ranks,
+-            create_gloo_process_groups
+-        )
++    def wrapper(*args, **kwargs):
++        # Bind against the wrapped Core version, not an older positional list.
++        # Keep native validation and all supported options intact.
++        bound = core_signature.bind(*args, **kwargs)
++        bound.apply_defaults()
++        initialize_model_parallel(*bound.args, **bound.kwargs)
++        options = bound.arguments
++        tensor_model_parallel_size = options['tensor_model_parallel_size']
++        pipeline_model_parallel_size = options['pipeline_model_parallel_size']
++        context_parallel_size = options['context_parallel_size']
++        nccl_communicator_config_path = options['nccl_communicator_config_path']
+         nccl_comm_cfgs = {}
+         if nccl_communicator_config_path is not None:
+             import yaml
+             with open(nccl_communicator_config_path, "r") as stream:
+                 nccl_comm_cfgs = yaml.safe_load(stream)
+ 
+-        initialize_context_parallel_group_for_send_recv_overlap(
+-            tensor_model_parallel_size,
+-            pipeline_model_parallel_size,
+-            context_parallel_size,
+-            nccl_comm_cfgs
+-        )
+-
+-        initialize_context_parallel_group_for_hybrid_cp(
+-            tensor_model_parallel_size,
+-            pipeline_model_parallel_size,
+-            context_parallel_size,
+-            nccl_comm_cfgs
+-        )
+-
+-        initialize_context_parallel_group_for_double_ring(
+-            tensor_model_parallel_size,
+-            pipeline_model_parallel_size,
+-            context_parallel_size,
+-            nccl_comm_cfgs
+-        )
++        for initialize_group in (
++            initialize_context_parallel_group_for_send_recv_overlap,
++            initialize_context_parallel_group_for_hybrid_cp,
++            initialize_context_parallel_group_for_double_ring,
++        ):
++            initialize_group(
++                tensor_model_parallel_size,
++                pipeline_model_parallel_size,
++                context_parallel_size,
++                nccl_comm_cfgs,
++            )
+ 
+     return wrapper
+ 
+--- a/mindspeed/core/context_parallel/dot_product_attention.py
++++ b/mindspeed/core/context_parallel/dot_product_attention.py
+@@ -48,11 +48,17 @@
+                  attention_type,
+                  attention_dropout: float = None,
+                  softmax_scale: float = None,
+-                 cp_comm_type: str = None):
++                 cp_comm_type: str = None,
++                 pg_collection=None):
+         cp_size = config.context_parallel_size
+         config.context_parallel_size = 1
+         self.config = config
+-        super().__init__(config, layer_number, attn_mask_type, attention_type, attention_dropout, softmax_scale, cp_comm_type)
++        super().__init__(
++            config=config, layer_number=layer_number, attn_mask_type=attn_mask_type,
++            attention_type=attention_type, attention_dropout=attention_dropout,
++            softmax_scale=softmax_scale, cp_comm_type=cp_comm_type,
++            **({'pg_collection': pg_collection} if pg_collection is not None else {}),
++        )
+         assert (
+                 self.config.context_parallel_size == 1
+         ), "Context parallelism is only supported by TEDotProductAttention!"
+@@ -67,7 +73,12 @@
+ 
+         projection_size = self.config.kv_channels * self.config.num_attention_heads
+         # Per attention head and per partition values.
+-        world_size = parallel_state.get_tensor_model_parallel_world_size()
++        if pg_collection is None:
++            world_size = parallel_state.get_tensor_model_parallel_world_size()
++        else:
++            self.pg_collection = pg_collection
++            self.tp_group = pg_collection.tp
++            world_size = self.tp_group.size()
+         self.hidden_size_per_partition = divide(projection_size, world_size)
+         self.hidden_size_per_attention_head = divide(projection_size, config.num_attention_heads)
+         self.num_attention_heads_per_partition = divide(self.config.num_attention_heads, world_size)
+--- a/mindspeed/core/context_parallel/adaptor.py
++++ b/mindspeed/core/context_parallel/adaptor.py
+@@ -24,8 +24,11 @@
+         layer_number,
+         attn_mask_type,
+         attention_type,
+-        cp_comm_type: str = None,):
+-        fn(self, config, submodules, layer_number, attn_mask_type, attention_type, cp_comm_type)
++        cp_comm_type: str = None,
++        pg_collection=None,):
++        fn(self, config, submodules, layer_number, attn_mask_type, attention_type,
++           cp_comm_type=cp_comm_type,
++           **({'pg_collection': pg_collection} if pg_collection is not None else {}))
+         cp = config.context_parallel_size
+         if config.tp_2d:
+             tp_y_cp_sz = cp * config.tp_y
+@@ -37,7 +40,8 @@
+                 tp_y_cp = TensorParallelYUnionCP()
+                 ulysses_group = tp_y_cp.group
+             else:
+-                ulysses_group = mpu.get_context_parallel_group()
++                ulysses_group = (pg_collection.cp if pg_collection is not None
++                                 else mpu.get_context_parallel_group())
+             if config.context_parallel_algo in ['hybrid_cp_algo', 'hybrid_adaptive_cp_algo']:
+                 ulysses_group = get_context_parallel_group_for_hybrid_ulysses()
+             self.core_attention = UlyssesContextAttention(self.core_attention, ulysses_group)
+@@ -54,8 +58,11 @@
+         layer_number,
+         attn_mask_type,
+         attention_type,
+-        cp_comm_type: str = None,):
+-        fn(self, config, submodules, layer_number, attn_mask_type, attention_type, cp_comm_type)
++        cp_comm_type: str = None,
++        pg_collection=None,):
++        fn(self, config, submodules, layer_number, attn_mask_type, attention_type,
++           cp_comm_type=cp_comm_type,
++           **({'pg_collection': pg_collection} if pg_collection is not None else {}))
+         cp = config.context_parallel_size
+         if config.tp_2d:
+             tp_y_cp_sz = cp * config.tp_y
+@@ -67,7 +74,8 @@
+                 tp_y_cp = TensorParallelYUnionCP()
+                 ulysses_group = tp_y_cp.group
+             else:
+-                ulysses_group = mpu.get_context_parallel_group()
++                ulysses_group = (pg_collection.cp if pg_collection is not None
++                                 else mpu.get_context_parallel_group())
+             if config.context_parallel_algo in ['hybrid_cp_algo', 'hybrid_adaptive_cp_algo']:
+                 ulysses_group = get_context_parallel_group_for_hybrid_ulysses()
+             self.core_attention = UlyssesContextAttention(self.core_attention, ulysses_group)
