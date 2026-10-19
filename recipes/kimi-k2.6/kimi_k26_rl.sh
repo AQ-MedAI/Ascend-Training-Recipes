@@ -12,6 +12,14 @@ export PYTHONPATH="$VERL_ROOT:${PYTHONPATH:-}"
 # ------------------------- Environment -------------------------
 # NPU/HCCL defaults. Override from the shell when cluster settings differ.
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False}"
+export HCCL_BUFFSIZE="${HCCL_BUFFSIZE:-200}"
+export GROUP_HCCL_BUFFER_SIZE="${GROUP_HCCL_BUFFER_SIZE:-200}"
+export P2P_HCCL_BUFFSIZE="${P2P_HCCL_BUFFSIZE:-0}"
+export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-6}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 export CUDA_LAUNCH_BLOCKING="${CUDA_LAUNCH_BLOCKING:-0}"
 export HYBRID_IGNORE_LOAD_CHECK="${HYBRID_IGNORE_LOAD_CHECK:-1}"
 export USE_MAX_V2="${USE_MAX_V2:-0}"
@@ -61,6 +69,12 @@ LR="${LR:-5.0e-7}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-1.0e-2}"
 CLIP_GRAD="${CLIP_GRAD:-1.0}"
 OPTIMIZER="${OPTIMIZER:-adam}"
+# Match the validated cropped MOPD optimizer policy; phase offload alone is insufficient.
+OPTIMIZER_CPU_OFFLOAD="${OPTIMIZER_CPU_OFFLOAD:-True}"
+OPTIMIZER_OFFLOAD_FRACTION="${OPTIMIZER_OFFLOAD_FRACTION:-1}"
+OVERLAP_CPU_OPTIMIZER_D2H_H2D="${OVERLAP_CPU_OPTIMIZER_D2H_H2D:-False}"
+USE_PRECISION_AWARE_OPTIMIZER="${USE_PRECISION_AWARE_OPTIMIZER:-False}"
+SEQUENCE_PARALLEL="${SEQUENCE_PARALLEL:-True}"
 BETAS="${BETAS:-[0.9,0.95]}"
 LR_DECAY_STYLE="${LR_DECAY_STYLE:-constant}"
 MIN_LR="${MIN_LR:-0.0}"
@@ -97,6 +111,13 @@ WANDB_DIR="${WANDB_DIR:-${OUTPUT_DIR%/}/wandb}"
 WANDB_ENTITY="${WANDB_ENTITY:-}"
 TENSORBOARD_DIR="${TENSORBOARD_DIR:-/path/to/tensorboard}"
 export TRANSFORMERS_VERBOSITY="${TRANSFORMERS_VERBOSITY:-error}"
+# DataProto serialization is independent of checkpoint save frequency.
+export VERL_DATAPROTO_SERIALIZATION_METHOD="${VERL_DATAPROTO_SERIALIZATION_METHOD:-torch}"
+case "$VERL_DATAPROTO_SERIALIZATION_METHOD" in
+    torch|numpy) ;;
+    *) echo 'VERL_DATAPROTO_SERIALIZATION_METHOD must be torch or numpy' >&2; exit 2 ;;
+esac
+export PYTHONFAULTHANDLER="${PYTHONFAULTHANDLER:-1}"
 if [[ -z "${LOGGER:-}" ]]; then
     if [[ "${WITH_TRACKING}" == "true" ]]; then
         LOGGER='["console","tensorboard","wandb"]'
@@ -136,6 +157,10 @@ ACTOR=(
     actor_rollout_ref.actor.optim.weight_decay="${WEIGHT_DECAY}"
     actor_rollout_ref.actor.optim.clip_grad="${CLIP_GRAD}"
     actor_rollout_ref.actor.optim.optimizer="${OPTIMIZER}"
+    +actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_cpu_offload="${OPTIMIZER_CPU_OFFLOAD}"
+    +actor_rollout_ref.actor.optim.override_optimizer_config.optimizer_offload_fraction="${OPTIMIZER_OFFLOAD_FRACTION}"
+    +actor_rollout_ref.actor.optim.override_optimizer_config.overlap_cpu_optimizer_d2h_h2d="${OVERLAP_CPU_OPTIMIZER_D2H_H2D}"
+    +actor_rollout_ref.actor.optim.override_optimizer_config.use_precision_aware_optimizer="${USE_PRECISION_AWARE_OPTIMIZER}"
     actor_rollout_ref.actor.optim.betas="${BETAS}"
     actor_rollout_ref.actor.optim.lr_decay_style="${LR_DECAY_STYLE}"
     actor_rollout_ref.actor.optim.min_lr="${MIN_LR}"
@@ -180,6 +205,7 @@ ACTOR=(
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_topk_scaling_factor=2.5
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_bias_update_rate=0.0
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_aux_loss_coeff=0.0
+    +actor_rollout_ref.actor.megatron.override_transformer_config.sequence_parallel="${SEQUENCE_PARALLEL}"
     +actor_rollout_ref.actor.megatron.override_transformer_config.attention_softmax_in_fp32=True
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_dtype=fp32
 )
@@ -275,10 +301,18 @@ REWARD=(
 EXTRA=(
     model_engine=megatron
     +seed="${SEED}"
-    +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE="'200'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE="'200'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'0'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE="'${HCCL_BUFFSIZE}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE="'${GROUP_HCCL_BUFFER_SIZE}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'${P2P_HCCL_BUFFSIZE}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_NPU_ALLOC_CONF="'${PYTORCH_NPU_ALLOC_CONF}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_CUDA_ALLOC_CONF="'${PYTORCH_CUDA_ALLOC_CONF}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_OP_EXPANSION_MODE="'${HCCL_OP_EXPANSION_MODE}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.OMP_NUM_THREADS="'${OMP_NUM_THREADS}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.MKL_NUM_THREADS="'${MKL_NUM_THREADS}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.NUMEXPR_NUM_THREADS="'${NUMEXPR_NUM_THREADS}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.VERL_DATAPROTO_SERIALIZATION_METHOD="'${VERL_DATAPROTO_SERIALIZATION_METHOD}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONFAULTHANDLER="'${PYTHONFAULTHANDLER}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY="'${TRANSFORMERS_VERBOSITY}'"
