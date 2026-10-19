@@ -9,7 +9,9 @@ setuptools>=77.0.3,<81
 setuptools-scm==8.3.1
 setuptools-rust>=1.9
 wheel
-jinja2
+jinja2==3.1.6
+# Shared with the validated runtime; keep build and runtime constraints consistent.
+markupsafe==3.0.3
 pybind11
 pip
 uv==0.11.6
