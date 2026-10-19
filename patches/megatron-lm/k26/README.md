@@ -115,3 +115,28 @@ rollout synchronization remain target-container validations. FSDP and optional
 quantized checkpoint integrations are outside this patch's validated scope.
 
 Optional TE types patch SHA-256: `a272e370341b345903de3d2d4cf4a79697a44e8033de17a47f5ecf14615463c6`.
+
+
+## In-process synchronous checkpoint writer
+
+`ascend-checkpoint-inprocess.patch` adds an opt-in `ASCEND_CHECKPOINT_WRITER=inprocess`
+mode to the pinned Core filesystem writer. The stock synchronous save still forks
+bucket writer processes. Native serialization crashes were traced to such a child
+while it read a CPU FP32 tensor after optimizer offload; the precise storage/runtime
+cause is not proven. This mode removes that fork boundary and uses the same native
+bucket serializer, fsync, write results and metadata in the caller process. It
+preserves CRC32 and the checkpoint format. Buckets are written sequentially, which
+may reduce I/O throughput.
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C /opt/ascend-training/Megatron-LM apply --check "$PWD/patches/megatron-lm/k26/ascend-checkpoint-inprocess.patch"
+git -C /opt/ascend-training/Megatron-LM apply "$PWD/patches/megatron-lm/k26/ascend-checkpoint-inprocess.patch"
+```
+
+K26 RL defaults to this mode and synchronous saves. Update the recipe and restart
+workers after applying. The runtime checker rejects an unpatched Core when this
+mode is selected. `ASCEND_CHECKPOINT_WRITER=multiprocess` restores the previous
+Core path for comparison. In-process mode is for synchronous checkpointing only;
+it does not make asynchronous background checkpoint processes safe on Ascend.
+Target-container save, load and resumed optimizer updates still require validation.

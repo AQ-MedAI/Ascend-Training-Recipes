@@ -5,6 +5,11 @@
 # Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
 set -xeuo pipefail
 K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export ASCEND_CHECKPOINT_WRITER="${ASCEND_CHECKPOINT_WRITER:-inprocess}"
+case "$ASCEND_CHECKPOINT_WRITER" in
+    inprocess|multiprocess) ;;
+    *) echo 'ASCEND_CHECKPOINT_WRITER must be inprocess or multiprocess' >&2; exit 2 ;;
+esac
 
 # ---- NPU environment ----
 export HF_HOME=${HF_HOME:-/path/to/hf_cache}
@@ -165,6 +170,7 @@ ACTOR=(
     actor_rollout_ref.actor.optim.weight_decay=1.0e-2
     actor_rollout_ref.actor.optim.clip_grad=1.0
     actor_rollout_ref.actor.optim.optimizer=adam
+    actor_rollout_ref.actor.checkpoint.async_save=False
     actor_rollout_ref.actor.optim.betas=[0.9,0.999]
     actor_rollout_ref.actor.optim.lr_decay_style=constant
     actor_rollout_ref.actor.optim.min_lr=1.0e-6
@@ -344,6 +350,7 @@ EXTRA=(
 source "${K26_SCRIPT_DIR}/runtime_env.sh"
 EXTRA+=(
     "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER='${ASCEND_CHECKPOINT_WRITER}'"
     "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
     "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
     "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY}'"

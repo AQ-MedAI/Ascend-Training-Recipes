@@ -101,6 +101,11 @@ SAVE_FREQ="${SAVE_FREQ:-10}"
 CHECKPOINT_SAVE_CONTENTS="${CHECKPOINT_SAVE_CONTENTS:-[model,optimizer,extra]}"
 CHECKPOINT_LOAD_CONTENTS="${CHECKPOINT_LOAD_CONTENTS:-[model,optimizer,extra]}"
 export K26_CHECKPOINT_TRACE="${K26_CHECKPOINT_TRACE:-0}"
+export ASCEND_CHECKPOINT_WRITER="${ASCEND_CHECKPOINT_WRITER:-inprocess}"
+case "$ASCEND_CHECKPOINT_WRITER" in
+    inprocess|multiprocess) ;;
+    *) echo 'ASCEND_CHECKPOINT_WRITER must be inprocess or multiprocess' >&2; exit 2 ;;
+esac
 TEST_FREQ="${TEST_FREQ:-10}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1145}"
@@ -320,6 +325,7 @@ EXTRA=(
     +ray_kwargs.ray_init.runtime_env.env_vars.VERL_DATAPROTO_SERIALIZATION_METHOD="'${VERL_DATAPROTO_SERIALIZATION_METHOD}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONFAULTHANDLER="'${PYTHONFAULTHANDLER}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.K26_CHECKPOINT_TRACE="'${K26_CHECKPOINT_TRACE}'"
+    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER="'${ASCEND_CHECKPOINT_WRITER}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
     +ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY="'${TRANSFORMERS_VERBOSITY}'"

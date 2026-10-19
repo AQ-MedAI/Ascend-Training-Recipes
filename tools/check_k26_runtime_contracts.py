@@ -39,6 +39,13 @@ def check_runtime_contracts():
         ),
     ]
     failures = []
+    import os
+
+    if os.getenv("ASCEND_CHECKPOINT_WRITER") == "inprocess":
+        from megatron.core.dist_checkpointing.strategies.filesystem_async import FileSystemWriterAsync
+
+        if not getattr(FileSystemWriterAsync, "supports_inprocess_write", False):
+            failures.append("Checkpoint writer: apply patches/megatron-lm/k26/ascend-checkpoint-inprocess.patch")
     for label, function, required in targets:
         parameters = inspect.signature(function).parameters
         # These group arguments must be implemented explicitly, not swallowed

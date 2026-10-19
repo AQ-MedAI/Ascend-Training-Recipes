@@ -196,3 +196,18 @@ save_checkpoint, including its Python caller and bounded tensor shape/dtype/devi
 metadata. It logs no tensor values and leaves CRC32 and the payload unchanged.
 The trace requires synchronous save and restores torch.save on return/error.
 It is diagnostic instrumentation, not a checkpoint correctness fix.
+
+## Synchronous checkpoint writer on Ascend
+
+RL and the MOPD smoke entry default to `ASCEND_CHECKPOINT_WRITER=inprocess`,
+with `checkpoint.async_save=False`. Apply the additional
+[Core checkpoint patch](../../patches/megatron-lm/k26/README.md#in-process-synchronous-checkpoint-writer)
+and restart workers. This mode keeps bucket serialization in the worker process
+rather than forking a child that reads offloaded host memory. The native serializer,
+CRC32, fsync and metadata/result protocol are retained. The exact cause of the
+observed child-process memory fault remains unproven; save/resume needs NPU testing.
+
+The startup checker requires the patched writer when this mode is enabled.
+`ASCEND_CHECKPOINT_WRITER=multiprocess` is available only for comparison with the
+previous Core path. A successful save should print `[checkpoint-writer] ... mode=inprocess`.
+CPU tests cover FP32/BF16 round trips, multiple buckets and write-error propagation.
