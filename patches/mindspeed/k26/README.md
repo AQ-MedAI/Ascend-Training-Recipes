@@ -266,3 +266,23 @@ distributed checkpoint save/resume. The earlier PP=1/CP=1 smoke validation canno
 be treated as validation of this new PP=2/CP=2 training mode.
 
 CP initialization patch SHA-256: `8e66104bd342256f214b1587b32cccd61bb8ca2010286954438e929d522b315c`.
+
+
+## RoPE context-parallel group compatibility
+
+`ascend-rope-cp-group.patch` is an incremental K26 patch on the prepared MindSpeed
+sources. Core passes `cp_group` to both RoPE and YaRN. The older MindSpeed
+replacement accepted only two arguments. This patch accepts the optional group,
+uses its local size/rank for Ring and Ulysses slicing, and retains legacy two-argument
+calls. Specialized hybrid/adaptive/2D-TP paths reject explicit groups whose local
+size/rank differ from the configured topology. RoPE, YaRN and shared rope_utils
+entrypoints use the same adapter. This does not validate distributed kernel numerics.
+
+```bash
+cd /workspace-verl/Ascend-Training-Recipes
+git -C third_party/MindSpeed apply --check "$PWD/patches/mindspeed/k26/ascend-rope-cp-group.patch"
+git -C third_party/MindSpeed apply "$PWD/patches/mindspeed/k26/ascend-rope-cp-group.patch"
+```
+
+Restart the training driver and Ray workers after applying the patch. The updated
+runtime contract checker checks the CP argument on MindSpeed, RoPE and YaRN.

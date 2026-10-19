@@ -1,0 +1,87 @@
+--- a/mindspeed/core/context_parallel/rotary_pos_embedding_utils.py
++++ b/mindspeed/core/context_parallel/rotary_pos_embedding_utils.py
+@@ -12,24 +12,31 @@
+ from mindspeed.core.context_parallel.utils import get_remapped_seq_order
+ 
+ 
+-def get_pos_emb_on_this_cp_rank(pos_emb, seq_dim):
++def get_pos_emb_on_this_cp_rank(pos_emb, seq_dim, cp_group=None):
+     args = get_args()
+ 
+     cp_expanded_by_2d_tp = args.tp_y > 1
++    if cp_group is not None and (cp_expanded_by_2d_tp or args.context_parallel_algo in (
++        'hybrid_cp_algo', 'adaptive_cp_algo', 'hybrid_adaptive_cp_algo'
++    )):
++        if (cp_group.size(), cp_group.rank()) != (
++            parallel_state.get_context_parallel_world_size(), parallel_state.get_context_parallel_rank()
++        ):
++            raise ValueError('Explicit RoPE CP group differs from the specialized MindSpeed CP topology')
+     if args.context_parallel_algo == 'megatron_cp_algo':
+         if args.attention_mask_type == 'general':
+-            pos_emb = _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim)
++            pos_emb = _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim, cp_group)
+         elif cp_expanded_by_2d_tp:
+             pos_emb = _get_pos_emb_on_this_tp_y_cp_rank_in_megatron_cp(pos_emb, seq_dim)
+         elif args.reset_position_ids and args.attention_mask_type == 'causal':
+             return pos_emb
+         else:
+-            pos_emb = _get_pos_emb_on_this_cp_rank_in_megatron_cp(pos_emb, seq_dim)
++            pos_emb = _get_pos_emb_on_this_cp_rank_in_megatron_cp(pos_emb, seq_dim, cp_group)
+     elif args.context_parallel_algo == 'ulysses_cp_algo':
+         if cp_expanded_by_2d_tp:
+             pos_emb = _get_pos_emb_on_this_tp_y_cp_rank_in_ulysses_cp(pos_emb, seq_dim)
+         else:
+-            pos_emb = _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim)
++            pos_emb = _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim, cp_group)
+     elif args.context_parallel_algo == 'hybrid_cp_algo':
+         if args.attention_mask_type == 'general':
+             pos_emb = _get_pos_emb_on_this_cp_rank_in_hybrid_cp_general(pos_emb, seq_dim)
+@@ -41,15 +48,15 @@
+         pos_emb = _get_pos_emb_on_this_cp_rank_in_hybrid_adaptive_cp(pos_emb, seq_dim)
+     elif args.context_parallel_algo == 'kvallgather_cp_algo':
+         if args.reset_position_ids:
+-            pos_emb = _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim)
++            pos_emb = _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim, cp_group)
+         else:
+-            pos_emb = _get_pos_emb_on_this_cp_rank_in_megatron_cp(pos_emb, seq_dim)
++            pos_emb = _get_pos_emb_on_this_cp_rank_in_megatron_cp(pos_emb, seq_dim, cp_group)
+     return pos_emb
+ 
+ 
+-def _get_pos_emb_on_this_cp_rank_in_megatron_cp(pos_emb, seq_dim):
+-    cp_size = parallel_state.get_context_parallel_world_size()
+-    cp_rank = parallel_state.get_context_parallel_rank()
++def _get_pos_emb_on_this_cp_rank_in_megatron_cp(pos_emb, seq_dim, cp_group=None):
++    cp_size = cp_group.size() if cp_group is not None else parallel_state.get_context_parallel_world_size()
++    cp_rank = cp_group.rank() if cp_group is not None else parallel_state.get_context_parallel_rank()
+     cp_idx = torch.tensor(
+         [cp_rank, (2 * cp_size - cp_rank - 1)], device="cpu", pin_memory=True
+     ).cuda(non_blocking=True)
+@@ -88,9 +95,9 @@
+     return cur_rank_pos_emb
+ 
+ 
+-def _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim):
+-    cp_size = parallel_state.get_context_parallel_world_size()
+-    cp_rank = parallel_state.get_context_parallel_rank()
++def _get_pos_emb_on_this_cp_rank_in_ulysses_cp(pos_emb, seq_dim, cp_group=None):
++    cp_size = cp_group.size() if cp_group is not None else parallel_state.get_context_parallel_world_size()
++    cp_rank = cp_group.rank() if cp_group is not None else parallel_state.get_context_parallel_rank()
+     pos_emb = pos_emb.chunk(cp_size, dim=seq_dim)[cp_rank]
+ 
+     return pos_emb
+--- a/mindspeed/features_manager/context_parallel/context_parallel_feature.py
++++ b/mindspeed/features_manager/context_parallel/context_parallel_feature.py
+@@ -138,3 +138,10 @@
+             patch_manager.register_patch(
+                 'megatron.core.models.common.embeddings.rotary_pos_embedding.get_pos_emb_on_this_cp_rank',
+-                get_pos_emb_on_this_cp_rank)
+\ No newline at end of file
++                get_pos_emb_on_this_cp_rank)
++
++            patch_manager.register_patch(
++                'megatron.core.models.common.embeddings.rope_utils.get_pos_emb_on_this_cp_rank',
++                get_pos_emb_on_this_cp_rank)
++            patch_manager.register_patch(
++                'megatron.core.models.common.embeddings.yarn_rotary_pos_embedding.get_pos_emb_on_this_cp_rank',
++                get_pos_emb_on_this_cp_rank)

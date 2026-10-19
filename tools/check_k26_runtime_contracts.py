@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check selected K26 BF16 model interfaces before starting Ray workers."""
+
 from __future__ import annotations
 
 import inspect
@@ -11,11 +12,16 @@ def check_runtime_contracts():
     from megatron.core import parallel_state as mpu
     from megatron.core.extensions import transformer_engine as te
     from megatron.core.extensions.transformer_engine_spec_provider import TESpecProvider
+    from megatron.core.models.common.embeddings import rotary_pos_embedding, yarn_rotary_pos_embedding
     from megatron.core.tensor_parallel.layers import ColumnParallelLinear
     from megatron.core.transformer.transformer_block import TransformerBlock
+    from mindspeed.core.context_parallel import rotary_pos_embedding_utils
     from mindspeed.core.context_parallel.model_parallel_utils import initialize_model_parallel_cp_wrapper
 
     targets = [
+        ("MindSpeed CP RoPE", rotary_pos_embedding_utils.get_pos_emb_on_this_cp_rank, {"cp_group"}),
+        ("Core RoPE CP", rotary_pos_embedding.get_pos_emb_on_this_cp_rank, {"cp_group"}),
+        ("Core YaRN CP", yarn_rotary_pos_embedding.get_pos_emb_on_this_cp_rank, {"cp_group"}),
         ("TEDotProductAttention", te.TEDotProductAttention.__init__, {"pg_collection"}),
         ("TELayerNormColumnParallelLinear", te.TELayerNormColumnParallelLinear.__init__, {"tp_group", "stride"}),
         ("TEColumnParallelGroupedLinear", te.TEColumnParallelGroupedLinear.__init__, {"pg_collection"}),
@@ -84,7 +90,7 @@ def check_runtime_contracts():
         raise RuntimeError(
             "K26 BF16 model interface mismatch:\n"
             + "\n".join(failures)
-            + "\nApply patches/mindspeed/k26/ascend-te-model-contracts.patch and restart workers."
+            + "\nApply the matching patches/mindspeed/k26 compatibility patches and restart workers."
         )
     return len(targets) + 3
 
