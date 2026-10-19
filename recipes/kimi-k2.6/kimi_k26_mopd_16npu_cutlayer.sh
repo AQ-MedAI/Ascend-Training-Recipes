@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Two-layer, two-teacher full-vocabulary MOPD smoke test on one 16-NPU node.
 # The student pool uses eight NPUs and the two teacher replicas use eight NPUs.
-# Prepopulate remote model code in the shared HF_HOME cache for offline workers.
 # Full-vocabulary teachers require matching tokenizers and vocabulary dimensions.
 set -xeuo pipefail
 K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +11,6 @@ case "$ASCEND_CHECKPOINT_WRITER" in
 esac
 
 # ---- NPU environment ----
-export HF_HOME=${HF_HOME:-/path/to/hf_cache}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
 export TRANSFORMERS_VERBOSITY="${TRANSFORMERS_VERBOSITY:-error}"
@@ -282,7 +280,7 @@ CANN_ENV_PROPAGATE=()
 CANN_ENV_NAMES=(LD_LIBRARY_PATH ASCEND_HOME_PATH ASCEND_OPP_PATH \
     ASCEND_AICPU_PATH ASCEND_TOOLKIT_HOME ASCEND_TOOLKIT_LATEST_HOME \
     ATB_HOME_PATH TOOLCHAIN_HOME CMAKE_PREFIX_PATH ASCEND_RUNTIME_OPTIONS \
-    HCCL_OP_EXPANSION_MODE ASCEND_LAUNCH_BLOCKING HF_HOME HF_HUB_OFFLINE TRANSFORMERS_OFFLINE)
+    HCCL_OP_EXPANSION_MODE ASCEND_LAUNCH_BLOCKING HF_HUB_OFFLINE TRANSFORMERS_OFFLINE)
 for _v in "${CANN_ENV_NAMES[@]}"; do
     _val="${!_v:-}"
     [ -z "$_val" ] && continue

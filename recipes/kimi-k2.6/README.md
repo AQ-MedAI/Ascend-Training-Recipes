@@ -58,8 +58,9 @@ bash recipes/kimi-k2.6/kimi_k26_rl_8npu_cutlayer.sh
 
 This profile defaults to TP2/PP2/CP2/EP4/ETP1, a single TP8 rollout replica, eight
 prompts and two samples per prompt. Actor parallelism can be overridden through
-`ACTOR_TP`, `ACTOR_PP`, `ACTOR_CP`, `ACTOR_EP`, and `ACTOR_ETP`. Other smoke settings
-remain fixed and Hydra overrides are rejected. It disables distillation and initial
+`ACTOR_TP`, `ACTOR_PP`, `ACTOR_CP`, `ACTOR_EP`, and `ACTOR_ETP`. Smoke context limits can be overridden through `MAX_PROMPT_LENGTH`,
+`MAX_RESPONSE_LENGTH`, `MAX_MODEL_LEN` and `ROLLOUT_MAX_NUM_BATCHED_TOKENS`.
+Other smoke settings remain fixed and Hydra overrides are rejected. It disables distillation and initial
 validation, and requests a checkpoint every training step. Success requires two
 training steps, including rollout, backward/optimizer execution and subsequent
 rollout weight updates. NPU execution and peak memory remain to be validated for
@@ -226,3 +227,28 @@ RL and MOPD smoke entries pass this variable to Ray workers explicitly. Keep the
 same topology and capture the first operator error plus its full Python stack.
 The default is `0`; synchronous launch is a diagnostic setting with a performance
 cost, not a fix for the operator failure.
+
+
+## Lower-memory topology smoke run
+
+TP2/PP2/CP2/EP4 does not guarantee lower peak memory than TP8/PP1/CP1/EP8.
+Smaller TP/EP groups can increase local weights and gradients. With only two
+layers, dense/MoE layer differences can also produce an uneven PP memory load.
+To separate activation pressure from fixed parameter pressure, keep the topology
+and test a shorter prompt first:
+
+```bash
+ASCEND_LAUNCH_BLOCKING=0 SAVE_FREQ=-1 \
+MAX_PROMPT_LENGTH=1024 MAX_RESPONSE_LENGTH=1 MAX_MODEL_LEN=1028 \
+ACTOR_MAX_TOKEN_LEN_PER_GPU=1025 LOG_PROB_MAX_TOKEN_LEN_PER_GPU=1025 \
+ROLLOUT_MAX_NUM_BATCHED_TOKENS=1028 \
+DATA_TRUNCATION=right FILTER_OVERLONG_PROMPTS=False \
+ACTOR_TP=2 ACTOR_PP=2 ACTOR_CP=2 ACTOR_EP=4 ACTOR_ETP=1 \
+bash recipes/kimi-k2.6/kimi_k26_rl_8npu_cutlayer.sh
+```
+
+This deliberately truncates long prompts for pipeline smoke coverage and does
+not validate reward quality or long-context training. Defaults remain 8192 prompt
+tokens with truncation=`error`. If short prompts pass, increase length gradually;
+if they still fail, inspect per-rank memory and the actual layer/expert placement
+rather than assuming further token reduction will fix parameter residency.
