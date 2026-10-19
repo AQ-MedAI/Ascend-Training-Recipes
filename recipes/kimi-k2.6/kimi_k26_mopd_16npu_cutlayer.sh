@@ -71,20 +71,20 @@ ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE:-8}
 max_prompt_length=${MAX_PROMPT_LENGTH:-8192}
 max_response_length=${MAX_RESPONSE_LENGTH:-1}
 # ---- megatron parallelism ----
-TP=${TP:-8}
-PP=${PP:-1}
-CP=${CP:-1}
-EP=${EP:-8}
-ETP=${ETP:-1}
+TP=${ACTOR_TP:-${TP:-2}}
+PP=${ACTOR_PP:-${PP:-2}}
+CP=${ACTOR_CP:-${CP:-2}}
+EP=${ACTOR_EP:-${EP:-4}}
+ETP=${ACTOR_ETP:-${ETP:-1}}
 ROLLOUT_EP=${ROLLOUT_EP:-8}
 ROLLOUT_DP=${ROLLOUT_DP:-1}
 OFFLOAD=${OFFLOAD:-True}     # megatron param/optimizer offload
 
 actor_ppo_max_token_len=$(( max_prompt_length + max_response_length + 1))
 infer_ppo_max_token_len=$(( max_prompt_length + max_response_length + 1))
-actor_ppo_max_token_len=$(( actor_ppo_max_token_len / CP ))
-infer_ppo_max_token_len=$(( infer_ppo_max_token_len / CP ))
-ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU:-$actor_ppo_max_token_len}
+# Keep token budgets large enough for a complete sequence before CP partitioning.
+infer_ppo_max_token_len=${LOG_PROB_MAX_TOKEN_LEN_PER_GPU:-$infer_ppo_max_token_len}
+ppo_max_token_len_per_gpu=${ACTOR_MAX_TOKEN_LEN_PER_GPU:-${PPO_MAX_TOKEN_LEN_PER_GPU:-$actor_ppo_max_token_len}}
 max_num_batched_tokens=${MAX_NUM_BATCHED_TOKENS:-2048}
 
 TEMPERATURE=${TEMPERATURE:-1.0}

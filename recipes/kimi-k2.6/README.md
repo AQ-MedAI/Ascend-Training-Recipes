@@ -50,12 +50,33 @@ LOG_DIR=/path/to/logs \
 bash recipes/kimi-k2.6/kimi_k26_rl_8npu_cutlayer.sh
 ```
 
-This profile uses TP8/PP1/CP1/EP8, a single TP8 rollout replica, eight prompts and two
-samples per prompt. It disables distillation, initial validation and checkpoint saving.
-It omits the full model's uneven pipeline split. Success requires two training steps,
-including rollout, backward/optimizer execution and subsequent rollout weight updates.
-The wrapper fixes smoke-test settings and rejects Hydra overrides; use the base RL entry
-for other topologies. NPU execution and peak memory for this profile remain unvalidated.
+This profile defaults to TP2/PP2/CP2/EP4/ETP1, a single TP8 rollout replica, eight
+prompts and two samples per prompt. Actor parallelism can be overridden through
+`ACTOR_TP`, `ACTOR_PP`, `ACTOR_CP`, `ACTOR_EP`, and `ACTOR_ETP`. Other smoke settings
+remain fixed and Hydra overrides are rejected. It disables distillation and initial
+validation, and requests a checkpoint every training step. Success requires two
+training steps, including rollout, backward/optimizer execution and subsequent
+rollout weight updates. NPU execution and peak memory remain to be validated for
+each topology.
+
+`pipeline_layout.py` reads the actual text decoder depth before framework startup.
+A four-layer checkpoint with PP=2 uses an even 2+2 split; no full-model endpoint
+layer counts are injected. The established 61-layer/PP10 profile retains first=3,
+last=2. Explicit `FIRST_PIPELINE_LAYERS` / `LAST_PIPELINE_LAYERS` values are validated;
+use `none` to leave an endpoint unspecified. Remove stale endpoint overrides when
+switching from a full model to a cut model.
+
+The default actor decomposition is equivalent to the following explicit settings;
+CP/PP communication still requires runtime validation:
+
+```bash
+ACTOR_TP=2 ACTOR_PP=2 ACTOR_CP=2 ACTOR_EP=4 ACTOR_ETP=1 \
+bash recipes/kimi-k2.6/kimi_k26_rl_8npu_cutlayer.sh
+```
+
+The smoke token budgets default to the full prompt-plus-response length (8193),
+and can be overridden through `ACTOR_MAX_TOKEN_LEN_PER_GPU` and
+`LOG_PROB_MAX_TOKEN_LEN_PER_GPU`. They no longer use a hard-coded division by two.
 
 For full-model RL, use `kimi_k26_rl.sh`. Multi-node jobs require a running Ray cluster
 and identical source, model, data and runtime paths on every node. Teacher models used
@@ -73,6 +94,29 @@ python3 recipes/kimi-k2.6/prepare_kimi_k26_cut_model.py \
 ```
 
 The helper requires `torch` and `safetensors` in `PYTHON_BIN`'s environment.
+
+## Four-layer MOPD smoke test
+
+`kimi_k26_mopd_16npu_cutlayer.sh` uses the same student defaults:
+`ACTOR_TP=2 ACTOR_PP=2 ACTOR_CP=2 ACTOR_EP=4 ACTOR_ETP=1`.
+These settings cover tensor, pipeline, context and expert parallelism; expert tensor
+parallelism remains at one. A four-layer student uses two layers per pipeline stage.
+The student uses eight NPUs. Two TP4 teacher replicas use another eight NPUs,
+so this test still requires 16 NPUs in total; rollout remains TP8.
+
+Configure the model and data paths in the launcher before running:
+
+```bash
+bash recipes/kimi-k2.6/kimi_k26_mopd_16npu_cutlayer.sh
+```
+
+Override student parallelism with `ACTOR_*`. Legacy `TP`, `PP`, `CP`, `EP` and `ETP`
+variables remain supported, with `ACTOR_*` taking precedence. Actor and log-prob
+budgets cover the complete sequence before CP partitioning and accept
+`ACTOR_MAX_TOKEN_LEN_PER_GPU` and `LOG_PROB_MAX_TOKEN_LEN_PER_GPU` overrides.
+The actor budget also accepts the legacy `PPO_MAX_TOKEN_LEN_PER_GPU` variable.
+These defaults do not establish that the topology has passed NPU validation.
+Full-model RL and MOPD defaults are unchanged.
 
 ## Image preparation
 

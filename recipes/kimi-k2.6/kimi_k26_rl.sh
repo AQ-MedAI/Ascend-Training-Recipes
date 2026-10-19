@@ -184,13 +184,20 @@ ACTOR=(
     +actor_rollout_ref.actor.megatron.override_transformer_config.moe_router_dtype=fp32
 )
 
-# Uneven pipeline splits apply only to the full-model pipeline profile.
-if (( ACTOR_PP > 1 )); then
-    ACTOR+=(
-        +actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_first_pipeline_stage="${FIRST_PIPELINE_LAYERS:-3}"
-        +actor_rollout_ref.actor.megatron.override_transformer_config.num_layers_in_last_pipeline_stage="${LAST_PIPELINE_LAYERS:-2}"
-    )
+# Resolve endpoint layers against the checkpoint depth before initializing NPU workers.
+PIPELINE_ARGS=(--model-path "$MODEL_PATH" --pp "$ACTOR_PP")
+if [[ -n "${FIRST_PIPELINE_LAYERS+x}" ]]; then
+    PIPELINE_ARGS+=(--first "$FIRST_PIPELINE_LAYERS")
 fi
+if [[ -n "${LAST_PIPELINE_LAYERS+x}" ]]; then
+    PIPELINE_ARGS+=(--last "$LAST_PIPELINE_LAYERS")
+fi
+PIPELINE_OVERRIDES="$("$PYTHON_BIN" "$K26_SCRIPT_DIR/pipeline_layout.py" "${PIPELINE_ARGS[@]}")"
+while IFS= read -r override; do
+    if [[ -n "$override" ]]; then
+        ACTOR+=("$override")
+    fi
+done <<< "$PIPELINE_OVERRIDES"
 
 ROLLOUT=(
     actor_rollout_ref.rollout.name="${ROLLOUT_NAME}"
