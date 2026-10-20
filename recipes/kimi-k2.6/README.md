@@ -107,48 +107,93 @@ The helper requires `torch` and `safetensors` in `PYTHON_BIN`'s environment.
 
 ## Two-layer MOPD smoke test
 
-`kimi_k26_mopd_16npu_cutlayer.sh` retains its independent student defaults:
-`ACTOR_TP=2 ACTOR_PP=2 ACTOR_CP=2 ACTOR_EP=4 ACTOR_ETP=1`.
-These settings cover tensor, pipeline, context and expert parallelism; expert tensor
-parallelism remains at one. A two-layer student uses one layer per pipeline stage.
-The student uses eight NPUs. Two TP4 teacher replicas use another eight NPUs,
-so this test still requires 16 NPUs in total; rollout remains TP8.
+`kimi_k26_mopd_16npu_cutlayer.sh` reuses `kimi_k26_rl.sh`, with the same
+student defaults as the validated RL smoke entry:
+`ACTOR_TP=4 ACTOR_PP=1 ACTOR_CP=2 ACTOR_EP=8 ACTOR_ETP=1`.
+It keeps both decoder layers on one pipeline stage. Eight student NPUs and two
+TP4 teacher replicas require one 16-NPU node. By default both teachers reuse
+the cropped student checkpoint; override `MATH_TEACHER_MODEL` and
+`GSM8K_TEACHER_MODEL` with models sharing its tokenizer and vocabulary.
 
-The launcher prepares and validates the same two-layer checkpoint as RL, using
-`MODEL_PATH` / `CUT_MODEL_PATH` and `FULL_MODEL_PATH`; both teachers reuse it.
-Configure the data, reward and cache paths in the launcher before running:
+The launcher creates or validates the two-layer checkpoint using `MODEL_PATH`,
+`CUT_MODEL_PATH` and `FULL_MODEL_PATH`. Data files default to
+`${DATA_ROOT:-/workspace-verl/data}/{math,gsm8k}/{train,test}.parquet`.
+
+| Dataset | Required `data_source` / teacher key | Task reward |
+| --- | --- | --- |
+| MATH | `DigitalLearningGmbH/MATH-lighteval` | DAPO boxed-answer matching: correct `1`, incorrect `-1` |
+| GSM8K | `openai/gsm8k` | GSM8K strict `####` matching: correct `1`, otherwise `0` |
+
+[multi_reward.py](multi_reward.py) routes by each sample's `data_source` and reads
+its final answer from `reward_model.ground_truth`. It rejects unknown sources.
+Override `REWARD_FN_PATH` to use a different reward dispatcher. For answers using
+`Answer: ...` instead of boxed notation, append
+`+reward.custom_reward_function.reward_kwargs.math_strict_box_verify=False`.
+The full-model MOPD launcher uses the same datasets, teacher keys and reward dispatcher.
 
 ```bash
+DATA_ROOT=/workspace-verl/data \
+MODEL_PATH=/path/to/Kimi-K2.6-2layers \
+OUTPUT_DIR=/path/to/output LOG_DIR=/path/to/logs \
 bash recipes/kimi-k2.6/kimi_k26_mopd_16npu_cutlayer.sh
 ```
 
-Both MOPD launchers default to [math_dapo_reward.py](math_dapo_reward.py), which
-calls verl's DAPO math scorer: correct answers receive `1`, incorrect answers `-1`.
-Provide the final reference answer in `reward_model.ground_truth`. By default,
-responses must contain `Answer: ...` near the end. For boxed answers, append
-`+reward.custom_reward_function.reward_kwargs.strict_box_verify=True` to the
-launcher command. This scorer applies to every sample, independently of teacher
-routing; code or mixed-task datasets require a suitable `REWARD_FN_PATH` override.
-The reward file must be readable at the same absolute path on every worker.
+Override individual dataset paths with `MATH_TRAIN_FILE`, `MATH_VAL_FILE`,
+`GSM8K_TRAIN_FILE` and `GSM8K_VAL_FILE`. Model, data and reward paths must be
+readable by all workers. Dataset identifiers must match the table exactly.
+
+The student uses eight prompts, two samples per prompt, 8192 prompt tokens and
+one response token, with eager rollout, left truncation and prompt filtering.
+Actor/log-prob token budgets default to 8193; rollout model length is 8196 and
+the batched-token budget is 4096. CPU optimizer offload, learning rate, gradient
+offload, recomputation and synchronous checkpoint settings come from the shared
+RL launcher. The run lasts two steps, saves each step and skips validation.
+These short responses exercise execution and do not validate answer quality.
+
+`ACTOR_*` overrides and legacy `TP`, `PP`, `CP`, `EP`, `ETP` remain supported.
+Token budgets accept `ACTOR_MAX_TOKEN_LEN_PER_GPU` and
+`LOG_PROB_MAX_TOKEN_LEN_PER_GPU`; the actor budget also accepts the legacy
+`PPO_MAX_TOKEN_LEN_PER_GPU`. Teacher settings and distillation loss have their own
+`TEACHER_*`, `DISTILLATION_*`, `FULL_VOCAB_CHUNK_TOKENS` and
+`USE_POLICY_GRADIENT` overrides. Default full-vocabulary distillation remains
+`forward_kl_full_vocab` with coefficient `0.5` and task rewards enabled.
+MOPD requires separate NPU validation; the completed RL run covers the student
+configuration only. Full-model launchers are unchanged.
+
+## Full-model MOPD
+
+`kimi_k26_mopd.sh` uses the same `DATA_ROOT`, per-dataset file overrides,
+`multi_reward.py` dispatcher and exact `data_source` values shown above.
+`MODEL_PATH` selects the full student checkpoint; `MATH_TEACHER_MODEL` and
+`GSM8K_TEACHER_MODEL` override the two teachers independently. Both default to
+the student checkpoint and must share its tokenizer and vocabulary.
 
 ```bash
-REWARD_FN_PATH="$PWD/recipes/kimi-k2.6/math_dapo_reward.py" \
-bash recipes/kimi-k2.6/kimi_k26_mopd_16npu_cutlayer.sh
+DATA_ROOT=/workspace-verl/data \
+MODEL_PATH=/path/to/Kimi-K2.6_bf16 \
+MATH_TEACHER_MODEL=/path/to/math-teacher \
+GSM8K_TEACHER_MODEL=/path/to/gsm8k-teacher \
+OUTPUT_DIR=/path/to/output LOG_DIR=/path/to/logs \
+bash recipes/kimi-k2.6/kimi_k26_mopd.sh
 ```
 
-Override student parallelism with `ACTOR_*`. Legacy `TP`, `PP`, `CP`, `EP` and `ETP`
-variables remain supported, with `ACTOR_*` taking precedence. Actor and log-prob
-budgets cover the complete sequence before CP partitioning and accept
-`ACTOR_MAX_TOKEN_LEN_PER_GPU` and `LOG_PROB_MAX_TOKEN_LEN_PER_GPU` overrides.
-The actor budget also accepts the legacy `PPO_MAX_TOKEN_LEN_PER_GPU` variable.
-These defaults do not establish that the topology has passed NPU validation.
-Full-model RL and MOPD defaults are unchanged.
+The full profile retains its own scale and training defaults: 40 student nodes,
+16 NPUs per node, TP8/PP10/CP8/EP64/ETP1, 64K prompt tokens and 8K response tokens.
+It defaults to reverse-KL full-vocabulary distillation; the smoke profile uses
+forward KL. Both use task rewards, coefficient `0.5`, the K26 runtime checker and
+synchronous in-process checkpoint writing. Configure the Ray cluster and dedicated
+teacher pool before launching; the one-node smoke placement does not apply here.
+
+Both MOPD entries use the RL algorithm defaults: GRPO, `gamma=1`, `lam=1`,
+`norm_adv_by_std_in_grpo=True`, `use_kl_in_reward=False` and
+`kl_ctrl.kl_coef=0`. Reference-policy KL is not added to task rewards.
+Teacher distillation is configured separately through `distillation.distillation_loss`.
 
 ## Image preparation
 
 See [K26 image adaptation](../../docker/k26/README.md). The public Core/Bridge
 baselines are pinned, but the new image is currently a source-only candidate.
-RL and the 16-NPU MOPD smoke launcher validate the selected Core/Bridge paths
+RL and both MOPD launchers validate the selected Core/Bridge paths
 through `runtime_env.sh`; set `MEGATRON_ROOT` and `MEGATRON_BRIDGE_ROOT` when
 using an existing compatible K26 environment.
 
@@ -164,8 +209,8 @@ Override them through `OPTIMIZER_CPU_OFFLOAD`, `OPTIMIZER_OFFLOAD_FRACTION`,
 
 `SEQUENCE_PARALLEL` defaults to `True`. For TP=1, set it to `False` if required
 by the selected Core configuration. Allocator, HCCL and thread settings are passed
-to Ray workers explicitly. RL HCCL buffer defaults are 200/200 MiB; the MOPD smoke
-profile uses 512/256 MiB. Peak memory depends on topology and sequence length.
+to Ray workers explicitly. RL and the MOPD smoke profile share HCCL buffer
+defaults of 200/200 MiB. Peak memory depends on topology and sequence length.
 
 ## Checkpoints
 
@@ -175,7 +220,7 @@ The RL smoke test defaults to `SAVE_FREQ=1`; full-model RL defaults to `10`.
 A successful training/save run does not establish resume correctness; validate
 resume separately before a production run.
 
-RL and the MOPD smoke entry default to `ASCEND_CHECKPOINT_WRITER=inprocess`.
+RL and both MOPD entries default to `ASCEND_CHECKPOINT_WRITER=inprocess`.
 Apply the [Core checkpoint patch](../../patches/megatron-lm/k26/README.md#in-process-synchronous-checkpoint-writer)
 before starting workers. It serializes checkpoint buckets in the worker process,
 retaining the native payload, CRC32, fsync and metadata protocol. The startup

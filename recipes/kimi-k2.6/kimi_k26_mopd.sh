@@ -26,15 +26,15 @@ export NUMEXPR_NUM_THREADS=1
 
 export ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
 
-VERL_ROOT=${VERL_ROOT:-/path/to/verl}
-cd "${VERL_ROOT}"
+export PYTHON_BIN="${PYTHON_BIN:-python3}"
+export VERL_ROOT="${VERL_ROOT:-$(cd "$K26_SCRIPT_DIR/../.." && pwd)/third_party/verl}"
 export PYTHONPATH="${VERL_ROOT}:${PYTHONPATH:-}"
 
 # ---- user-adjustable ----
-HF_MODEL_PATH=/path/to/Kimi-K2.6_bf16
-STUDENT_MODEL=${HF_MODEL_PATH}
-GSM8K_TEACHER_MODEL=${HF_MODEL_PATH}
-MATH_TEACHER_MODEL=${HF_MODEL_PATH}
+export MODEL_PATH="${MODEL_PATH:-/path/to/Kimi-K2.6_bf16}"
+STUDENT_MODEL="$MODEL_PATH"
+GSM8K_TEACHER_MODEL="${GSM8K_TEACHER_MODEL:-${MODEL_PATH}}"
+MATH_TEACHER_MODEL="${MATH_TEACHER_MODEL:-${MODEL_PATH}}"
 
 NNODES=${NNODES:-40}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-16}
@@ -85,37 +85,45 @@ actor_lr=${ACTOR_LR:-5.0e-7}
 rollout_gpu_mem_util=${ROLLOUT_GPU_MEM_UTIL:-0.4}
 teacher_max_model_len=${TEACHER_MAX_MODEL_LEN:-$max_num_tokens}
 
-total_epochs=${TOTAL_EPOCHS:-1}   # smoke
+total_epochs=${TOTAL_EPOCHS:-1}
 save_freq=${SAVE_FREQ:-100}
 test_freq=${TEST_FREQ:-50}
 project_name=${PROJECT_NAME:-verl_distill_mopd_full}
 experiment_name=${EXPERIMENT_NAME:-k26_full_mopd_2teacher_fullvocab}
-reward_fn_path="${REWARD_FN_PATH:-${K26_SCRIPT_DIR}/math_dapo_reward.py}"
+# Each parquet's data_source must match its teacher key and reward branch.
+DATA_ROOT="${DATA_ROOT:-/workspace-verl/data}"
+MATH_TRAIN_FILE="${MATH_TRAIN_FILE:-${DATA_ROOT}/math/train.parquet}"
+MATH_VAL_FILE="${MATH_VAL_FILE:-${DATA_ROOT}/math/test.parquet}"
+GSM8K_TRAIN_FILE="${GSM8K_TRAIN_FILE:-${DATA_ROOT}/gsm8k/train.parquet}"
+GSM8K_VAL_FILE="${GSM8K_VAL_FILE:-${DATA_ROOT}/gsm8k/test.parquet}"
+export TRAIN_FILES="$("$PYTHON_BIN" -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$MATH_TRAIN_FILE" "$GSM8K_TRAIN_FILE")"
+export VAL_FILES="$("$PYTHON_BIN" -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$MATH_VAL_FILE" "$GSM8K_VAL_FILE")"
+export REWARD_FN_PATH="${REWARD_FN_PATH:-${K26_SCRIPT_DIR}/multi_reward.py}"
 
-# Dataset A: gsm8k  (data_source = "openai/gsm8k") -> teacher gsm8k
-gsm8k_train=/path/to/train.parquet
-gsm8k_test=/path/to/test.parquet
-math_train=/path/to/orz_math_train.parquet
-math_test=/path/to/orz_math_train.parquet
-train_files="['$gsm8k_train', '$math_train']"
-val_files="['$gsm8k_test', '$math_test']"
+
 # ---- end user-adjustable ----
 
 ########################### parameter arrays ###########################
 
+ALGORITHM=(
+    algorithm.adv_estimator="${ADV_ESTIMATOR:-grpo}"
+    algorithm.gamma=1.0
+    algorithm.lam=1.0
+    algorithm.norm_adv_by_std_in_grpo=True
+    algorithm.use_kl_in_reward=False
+    algorithm.kl_ctrl.kl_coef=0.0
+)
+
+
 DATA=(
-    algorithm.adv_estimator=grpo
-    algorithm.use_kl_in_reward=True
-    algorithm.kl_penalty=kl
-    +algorithm.kl_coef=0.001
-    data.train_files="$train_files"
-    data.val_files="$val_files"
+    data.train_files="$TRAIN_FILES"
+    data.val_files="$VAL_FILES"
     data.train_batch_size=${train_batch_size}
     data.max_prompt_length=${max_prompt_length}
     data.max_response_length=${max_response_length}
-    data.filter_overlong_prompts=True
-    data.filter_overlong_prompts_workers=${FILTER_WORKERS:-8}
-    data.truncation='error'
+    data.filter_overlong_prompts="${FILTER_OVERLONG_PROMPTS:-True}"
+    data.filter_overlong_prompts_workers=${FILTER_WORKERS:-4}
+    data.truncation="${DATA_TRUNCATION:-left}"
     data.shuffle=True
     data.train_max_samples=${TRAIN_MAX_SAMPLES:-5000}
     data.val_max_samples=${VAL_MAX_SAMPLES:-1000}
@@ -135,6 +143,9 @@ ACTOR=(
     actor_rollout_ref.actor.optim.weight_decay=1.0e-2
     actor_rollout_ref.actor.optim.clip_grad=1.0
     actor_rollout_ref.actor.optim.optimizer=adam
+    actor_rollout_ref.actor.checkpoint.async_save=False
+    actor_rollout_ref.actor.checkpoint.save_contents="${CHECKPOINT_SAVE_CONTENTS:-[model,optimizer,extra]}"
+    actor_rollout_ref.actor.checkpoint.load_contents="${CHECKPOINT_LOAD_CONTENTS:-[model,optimizer,extra]}"
     actor_rollout_ref.actor.optim.betas=[0.9,0.95]
     actor_rollout_ref.actor.optim.lr_decay_style=constant
     actor_rollout_ref.actor.optim.min_lr=0.0
@@ -234,26 +245,30 @@ TRAINER=(
     trainer.save_freq=${save_freq}
     trainer.test_freq=${test_freq}
     trainer.total_epochs=${total_epochs}
-    trainer.default_local_dir=/path/to/ckpt
+    trainer.default_local_dir="${OUTPUT_DIR:-/path/to/ckpt}/${project_name}/${experiment_name}"
     trainer.max_actor_ckpt_to_keep=5
 )
 
 REWARD=(
-    reward.custom_reward_function.path=${reward_fn_path}
+    reward.custom_reward_function.path="$REWARD_FN_PATH"
     reward.custom_reward_function.name=compute_score
 )
 
+export ASCEND_CHECKPOINT_WRITER="${ASCEND_CHECKPOINT_WRITER:-inprocess}"
+case "$ASCEND_CHECKPOINT_WRITER" in
+    inprocess|multiprocess) ;;
+    *) echo 'ASCEND_CHECKPOINT_WRITER must be inprocess or multiprocess' >&2; exit 2 ;;
+esac
+source "$K26_SCRIPT_DIR/runtime_env.sh"
+
 CANN_ENV_PROPAGATE=()
-CANN_ENV_NAMES=(PYTHONPATH LD_LIBRARY_PATH ASCEND_HOME_PATH ASCEND_OPP_PATH \
+CANN_ENV_NAMES=(LD_LIBRARY_PATH ASCEND_HOME_PATH ASCEND_OPP_PATH \
     ASCEND_AICPU_PATH ASCEND_TOOLKIT_HOME ASCEND_TOOLKIT_LATEST_HOME \
     ATB_HOME_PATH TOOLCHAIN_HOME CMAKE_PREFIX_PATH ASCEND_RUNTIME_OPTIONS \
     HCCL_OP_EXPANSION_MODE HF_HUB_OFFLINE TRANSFORMERS_OFFLINE)
 for _v in "${CANN_ENV_NAMES[@]}"; do
-    _val="${!_v}"
+    _val="${!_v:-}"
     [ -z "$_val" ] && continue
-    if [ "$_v" = "PYTHONPATH" ]; then
-        _val="${VERL_ROOT}:${_val}"
-    fi
     CANN_ENV_PROPAGATE+=("+ray_kwargs.ray_init.runtime_env.env_vars.${_v}='${_val}'")
 done
 unset _v _val
@@ -283,7 +298,7 @@ EXTRA=(
     +distillation.teacher_models.gsm8k.inference.max_num_batched_tokens=${teacher_max_model_len}
     +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.kv_cache_dtype=auto
     +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.mamba_cache_dtype=float32
-    +distillation.teacher_models.math.key="math"
+    +distillation.teacher_models.math.key="DigitalLearningGmbH/MATH-lighteval"
     +distillation.teacher_models.math.model_path="$MATH_TEACHER_MODEL"
     +distillation.teacher_models.math.num_replicas=${TEACHER_NUM_REPLICAS_MATH}
     +distillation.teacher_models.math.inference.name=vllm
@@ -301,7 +316,7 @@ EXTRA=(
     +distillation.teacher_models.math.inference.engine_kwargs.vllm.kv_cache_dtype=auto
     +distillation.teacher_models.math.inference.engine_kwargs.vllm.mamba_cache_dtype=float32
     # --- loss: task-reward RL + fullvocab distillation regularizer ---
-    # L = policy_loss(task correctness) + distillation_loss_coef * fullvocab_forward_kl(q||p)
+    # Task-reward policy loss plus the configured teacher distillation loss.
     distillation.distillation_loss.loss_mode=${distillation_loss_mode}
     distillation.distillation_loss.full_vocab_chunk_tokens=${full_vocab_chunk_tokens}
     distillation.distillation_loss.topk=${distillation_topk}
@@ -309,7 +324,7 @@ EXTRA=(
     distillation.distillation_loss.use_policy_gradient=${use_policy_gradient}
     distillation.distillation_loss.loss_max_clamp=2.0
     distillation.distillation_loss.log_prob_min_clamp=-10.0
-    distillation.distillation_loss.distillation_loss_coef=0.5
+    distillation.distillation_loss.distillation_loss_coef="${DISTILLATION_LOSS_COEF:-0.5}"
     "+ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_NPU_ALLOC_CONF='max_split_size_mb:256'"
     "+ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE='200'"
     "+ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE='200'"
@@ -317,12 +332,21 @@ EXTRA=(
     "${CANN_ENV_PROPAGATE[@]}"
 )
 
+EXTRA+=(
+    "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER='${ASCEND_CHECKPOINT_WRITER}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY:-error}'"
+)
+
 ########################### launch ###########################
-LOG_DIR=/path/to/k26_full_mopd_fullvocab
+LOG_DIR="${LOG_DIR:-/path/to/k26_full_mopd_fullvocab}"
 mkdir -p "${LOG_DIR}"
 start_time=$(date +%Y%m%d_%H%M%S)
-python3 -m verl.trainer.main_ppo \
+"$PYTHON_BIN" -m verl.trainer.main_ppo \
     "${DATA[@]}" \
+    "${ALGORITHM[@]}" \
     "${MODEL[@]}" \
     "${ACTOR[@]}" \
     "${ROLLOUT[@]}" \
