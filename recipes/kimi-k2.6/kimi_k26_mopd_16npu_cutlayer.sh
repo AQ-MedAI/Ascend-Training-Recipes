@@ -30,15 +30,9 @@ export LR_WARMUP_STEPS_RATIO=0
 export LOGGER='["console"]' WITH_TRACKING=false
 export PROJECT_NAME="${PROJECT_NAME:-verl_distill_mopd_math_gsm8k}"
 export EXP_NAME="${EXP_NAME:-${EXPERIMENT_NAME:-kimi_k26_mopd_2layers_smoke}}"
-export HCCL_NPU_SOCKET_PORT_RANGE="${HCCL_NPU_SOCKET_PORT_RANGE:-auto}"
-export HCCL_HOST_SOCKET_PORT_RANGE="${HCCL_HOST_SOCKET_PORT_RANGE:-auto}"
-
 # Student and teacher pools need disjoint devices; defaults require all 16 NPUs.
 export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}"
-export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
-export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
-export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
-export VLLM_USE_V1=1 TASK_QUEUE_ENABLE=0
+# Common HCCL/offline/allocator defaults come from the parent launcher.
 
 # Data, reward routing and teacher definitions are maintained by kimi_k26_mopd.sh.
 export TEACHER_NNODES=1

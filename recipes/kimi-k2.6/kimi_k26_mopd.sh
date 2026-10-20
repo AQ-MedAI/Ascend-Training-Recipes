@@ -6,32 +6,7 @@
 set -xeuo pipefail
 K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-#export HF_HOME=${HF_HOME:-/path/to/hf_cache}
-export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
-export TRANSFORMERS_OFFLINE=${TRANSFORMERS_OFFLINE:-1}
-export HCCL_CONNECT_TIMEOUT="${HCCL_CONNECT_TIMEOUT:-1500}"
-export HCCL_HOST_SOCKET_PORT_RANGE="${HCCL_HOST_SOCKET_PORT_RANGE:-auto}"
-export HCCL_NPU_SOCKET_PORT_RANGE="${HCCL_NPU_SOCKET_PORT_RANGE:-auto}"
-export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
-export VLLM_USE_V1=1
-export TASK_QUEUE_ENABLE=0
-export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
-export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False}"
-export ASCEND_LAUNCH_BLOCKING="${ASCEND_LAUNCH_BLOCKING:-0}"
-export PYTHONFAULTHANDLER="${PYTHONFAULTHANDLER:-1}"
-export HCCL_BUFFSIZE="${HCCL_BUFFSIZE:-200}"
-export GROUP_HCCL_BUFFER_SIZE="${GROUP_HCCL_BUFFER_SIZE:-200}"
-export P2P_HCCL_BUFFSIZE="${P2P_HCCL_BUFFSIZE:-0}"
-export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-6}"
-export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
-export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
-
-export ASCEND_RT_VISIBLE_DEVICES=${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}
-
-export PYTHON_BIN="${PYTHON_BIN:-python3}"
-export VERL_ROOT="${VERL_ROOT:-$(cd "$K26_SCRIPT_DIR/../.." && pwd)/third_party/verl}"
-export PYTHONPATH="${VERL_ROOT}:${PYTHONPATH:-}"
+source "$K26_SCRIPT_DIR/common_env.sh"
 
 # ---- user-adjustable ----
 export MODEL_PATH="${MODEL_PATH:-/path/to/Kimi-K2.6_bf16}"
@@ -48,7 +23,7 @@ ACTOR_EP=${ACTOR_EP:-${EP:-64}}
 ACTOR_ETP=${ACTOR_ETP:-${ETP:-1}}
 ROLLOUT_TP=${ROLLOUT_TP:-${GEN_TP:-8}}
 ROLLOUT_DP=${ROLLOUT_DP:-16}
-ROLLOUT_EP=${ROLLOUT_EP:-128}
+ROLLOUT_EP=${ROLLOUT_EP-128}
 OFFLOAD=${OFFLOAD:-True}
 
 TEACHER_NNODES=${TEACHER_NNODES:-16}
@@ -60,6 +35,14 @@ TEACHER_EP=${TEACHER_EP-128}
 TEACHER_NUM_REPLICAS_GSM8K=${TEACHER_NUM_REPLICAS_GSM8K:-1}
 TEACHER_NUM_REPLICAS_MATH=${TEACHER_NUM_REPLICAS_MATH:-1}
 TEACHER_GPU_MEM_UTIL=${TEACHER_GPU_MEM_UTIL:-0.7}
+
+TEACHER_PROFILE="${TEACHER_PROFILE:-multi}"
+case "$TEACHER_PROFILE" in single|multi) ;; *) echo 'TEACHER_PROFILE must be single or multi' >&2; exit 2 ;; esac
+DISTILLATION_SHARE_GPU_GROUP="${DISTILLATION_SHARE_GPU_GROUP:-False}"
+MAX_AWAKE_TEACHERS="${MAX_AWAKE_TEACHERS:-1}"
+USE_TASK_REWARDS="${USE_TASK_REWARDS:-True}"
+DISTILLATION_LOSS_MAX_CLAMP="${DISTILLATION_LOSS_MAX_CLAMP:-2.0}"
+LOGGER="${LOGGER:-[\"console\"]}"
 
 distillation_loss_mode=${DISTILLATION_LOSS_MODE:-reverse_kl_full_vocab}
 full_vocab_chunk_tokens=${FULL_VOCAB_CHUNK_TOKENS:-4096}
@@ -281,7 +264,7 @@ REF=(
 TRAINER=(
     trainer.device=npu
     trainer.balance_batch=True
-    trainer.logger='["console"]'
+    trainer.logger="${LOGGER}"
     trainer.project_name=${project_name}
     trainer.experiment_name=${experiment_name}
     trainer.n_gpus_per_node=${GPUS_PER_NODE}
@@ -308,97 +291,70 @@ case "$ASCEND_CHECKPOINT_WRITER" in
 esac
 source "$K26_SCRIPT_DIR/runtime_env.sh"
 
-CANN_ENV_PROPAGATE=()
-CANN_ENV_NAMES=(LD_LIBRARY_PATH ASCEND_HOME_PATH ASCEND_OPP_PATH \
-    ASCEND_AICPU_PATH ASCEND_TOOLKIT_HOME ASCEND_TOOLKIT_LATEST_HOME \
-    ATB_HOME_PATH TOOLCHAIN_HOME CMAKE_PREFIX_PATH ASCEND_RUNTIME_OPTIONS \
-    HCCL_HOST_SOCKET_PORT_RANGE HCCL_NPU_SOCKET_PORT_RANGE HCCL_CONNECT_TIMEOUT \
-    HCCL_OP_EXPANSION_MODE HF_HUB_OFFLINE TRANSFORMERS_OFFLINE VLLM_USE_V1 TASK_QUEUE_ENABLE
-    ASCEND_LAUNCH_BLOCKING PYTHONFAULTHANDLER)
-for _v in "${CANN_ENV_NAMES[@]}"; do
-    _val="${!_v:-}"
-    [ -z "$_val" ] && continue
-    CANN_ENV_PROPAGATE+=("++ray_kwargs.ray_init.runtime_env.env_vars.${_v}='${_val}'")
-done
-unset _v _val
+source "$K26_SCRIPT_DIR/ray_env.sh"
 
 # Multi-teacher: one teacher per dataset, routed by sample's `data_source` value.
 EXTRA=(
     model_engine=megatron
-    +seed=42
+    +seed="${SEED:-42}"
     distillation.enabled=True
     distillation.n_gpus_per_node=${TEACHER_GPUS_PER_NODE}
     distillation.nnodes=${TEACHER_NNODES}
     distillation.teacher_key=data_source
-    +distillation.teacher_models.gsm8k.key="openai/gsm8k"
-    +distillation.teacher_models.gsm8k.model_path="$GSM8K_TEACHER_MODEL"
-    +distillation.teacher_models.gsm8k.num_replicas=${TEACHER_NUM_REPLICAS_GSM8K}
-    +distillation.teacher_models.gsm8k.inference.name=vllm
-    +distillation.teacher_models.gsm8k.inference.tensor_model_parallel_size=${TEACHER_TP}
-    +distillation.teacher_models.gsm8k.inference.data_parallel_size=${TEACHER_DP}
-    +distillation.teacher_models.gsm8k.inference.gpu_memory_utilization=${TEACHER_GPU_MEM_UTIL}
-    +distillation.teacher_models.gsm8k.inference.enforce_eager="${TEACHER_ENFORCE_EAGER:-False}"
-    +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.cudagraph_capture_sizes=[1]
-    +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.prefill_context_parallel_size=${TEACHER_PCP}
-    +distillation.teacher_models.gsm8k.inference.enable_chunked_prefill=False
-    +distillation.teacher_models.gsm8k.inference.max_num_seqs=1
-    +distillation.teacher_models.gsm8k.inference.max_model_len=${teacher_max_model_len}
-    +distillation.teacher_models.gsm8k.inference.max_num_batched_tokens=${teacher_max_model_len}
-    +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.kv_cache_dtype=auto
-    +distillation.teacher_models.gsm8k.inference.engine_kwargs.vllm.mamba_cache_dtype=float32
-    +distillation.teacher_models.math.key="DigitalLearningGmbH/MATH-lighteval"
-    +distillation.teacher_models.math.model_path="$MATH_TEACHER_MODEL"
-    +distillation.teacher_models.math.num_replicas=${TEACHER_NUM_REPLICAS_MATH}
-    +distillation.teacher_models.math.inference.name=vllm
-    +distillation.teacher_models.math.inference.tensor_model_parallel_size=${TEACHER_TP}
-    +distillation.teacher_models.math.inference.data_parallel_size=${TEACHER_DP}
-    +distillation.teacher_models.math.inference.gpu_memory_utilization=${TEACHER_GPU_MEM_UTIL}
-    +distillation.teacher_models.math.inference.enforce_eager="${TEACHER_ENFORCE_EAGER:-False}"
-    +distillation.teacher_models.math.inference.engine_kwargs.vllm.cudagraph_capture_sizes=[1]
-    +distillation.teacher_models.math.inference.engine_kwargs.vllm.prefill_context_parallel_size=${TEACHER_PCP}
-    +distillation.teacher_models.math.inference.enable_chunked_prefill=False
-    +distillation.teacher_models.math.inference.max_num_seqs=1
-    +distillation.teacher_models.math.inference.max_model_len=${teacher_max_model_len}
-    +distillation.teacher_models.math.inference.max_num_batched_tokens=${teacher_max_model_len}
-    +distillation.teacher_models.math.inference.engine_kwargs.vllm.kv_cache_dtype=auto
-    +distillation.teacher_models.math.inference.engine_kwargs.vllm.mamba_cache_dtype=float32
     # --- loss: task-reward RL + fullvocab distillation regularizer ---
     # Task-reward policy loss plus the configured teacher distillation loss.
     distillation.distillation_loss.loss_mode=${distillation_loss_mode}
     distillation.distillation_loss.full_vocab_chunk_tokens=${full_vocab_chunk_tokens}
     distillation.distillation_loss.topk=${distillation_topk}
-    distillation.distillation_loss.use_task_rewards=True
+    distillation.distillation_loss.use_task_rewards="${USE_TASK_REWARDS}"
     distillation.distillation_loss.use_policy_gradient=${use_policy_gradient}
-    distillation.distillation_loss.loss_max_clamp=2.0
+    distillation.distillation_loss.loss_max_clamp="${DISTILLATION_LOSS_MAX_CLAMP}"
     distillation.distillation_loss.log_prob_min_clamp=-10.0
     distillation.distillation_loss.distillation_loss_coef="${DISTILLATION_LOSS_COEF:-0.5}"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_NPU_ALLOC_CONF='${PYTORCH_NPU_ALLOC_CONF}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE='${HCCL_BUFFSIZE}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE='${GROUP_HCCL_BUFFER_SIZE}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_TEACHER_DEDICATED_RACK='${VERL_TEACHER_DEDICATED_RACK:-1}'"
-    "${CANN_ENV_PROPAGATE[@]}"
+    distillation.share_gpu_group="${DISTILLATION_SHARE_GPU_GROUP}"
+    distillation.max_awake_teachers="${MAX_AWAKE_TEACHERS}"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.VERL_TEACHER_DEDICATED_RACK='${VERL_TEACHER_DEDICATED_RACK:-1}'"
+    "${K26_RUNTIME_ENV_ARGS[@]}"
 )
 
-if [[ -n "$TEACHER_EP" ]]; then
-    for teacher in math gsm8k; do
-        EXTRA+=("+distillation.teacher_models.${teacher}.inference.expert_parallel_size=${TEACHER_EP}")
-    done
+# Teacher geometry and loss policy belong to each entry profile; actor/runtime
+# configuration above is shared. An empty EP disables explicit expert parallelism.
+k26_add_teacher() {
+    local name="$1" key="$2" model="$3" replicas="$4" tp="$5" dp="$6" pcp="$7" ep="$8" memory="$9"
+    local prefix="distillation.teacher_models.${name}"
+    EXTRA+=(
+        "++${prefix}.model_path=${model}"
+        "++${prefix}.num_replicas=${replicas}"
+        "++${prefix}.inference.name=vllm"
+        "++${prefix}.inference.tensor_model_parallel_size=${tp}"
+        "++${prefix}.inference.data_parallel_size=${dp}"
+        "++${prefix}.inference.gpu_memory_utilization=${memory}"
+        "++${prefix}.inference.enforce_eager=${TEACHER_ENFORCE_EAGER:-False}"
+        "++${prefix}.inference.engine_kwargs.vllm.cudagraph_capture_sizes=${TEACHER_CUDAGRAPH_CAPTURE_SIZES:-[1]}"
+        "++${prefix}.inference.engine_kwargs.vllm.prefill_context_parallel_size=${pcp}"
+        "++${prefix}.inference.enable_chunked_prefill=${TEACHER_ENABLE_CHUNKED_PREFILL:-False}"
+        "++${prefix}.inference.enable_prefix_caching=False"
+        "++${prefix}.inference.max_num_seqs=${TEACHER_MAX_NUM_SEQS:-1}"
+        "++${prefix}.inference.max_model_len=${teacher_max_model_len}"
+        "++${prefix}.inference.max_num_batched_tokens=${TEACHER_MAX_NUM_BATCHED_TOKENS:-${teacher_max_model_len}}"
+        "++${prefix}.inference.engine_kwargs.vllm.kv_cache_dtype=auto"
+        "++${prefix}.inference.engine_kwargs.vllm.mamba_cache_dtype=float32"
+    )
+    [[ -z "$key" ]] || EXTRA+=("++${prefix}.key=${key}")
+    [[ -z "$ep" ]] || EXTRA+=("++${prefix}.inference.expert_parallel_size=${ep}")
+    return 0
+}
+if [[ "$TEACHER_PROFILE" == single ]]; then
+    k26_add_teacher teacher_model "${SINGLE_TEACHER_KEY:-}" "${TEACHER_MODEL:-$MODEL_PATH}" \
+        "${TEACHER_NUM_REPLICAS:-0}" "$TEACHER_TP" "$TEACHER_DP" "$TEACHER_PCP" "$TEACHER_EP" "$TEACHER_GPU_MEM_UTIL"
+else
+    k26_add_teacher gsm8k "${GSM8K_TEACHER_KEY:-openai/gsm8k}" "$GSM8K_TEACHER_MODEL" \
+        "$TEACHER_NUM_REPLICAS_GSM8K" "${GSM8K_TEACHER_TP:-$TEACHER_TP}" "${GSM8K_TEACHER_DP:-$TEACHER_DP}" \
+        "${GSM8K_TEACHER_PCP:-$TEACHER_PCP}" "${GSM8K_TEACHER_EP-$TEACHER_EP}" "${GSM8K_TEACHER_GPU_MEM_UTIL:-$TEACHER_GPU_MEM_UTIL}"
+    k26_add_teacher math "${MATH_TEACHER_KEY:-DigitalLearningGmbH/MATH-lighteval}" "$MATH_TEACHER_MODEL" \
+        "$TEACHER_NUM_REPLICAS_MATH" "${MATH_TEACHER_TP:-$TEACHER_TP}" "${MATH_TEACHER_DP:-$TEACHER_DP}" \
+        "${MATH_TEACHER_PCP:-$TEACHER_PCP}" "${MATH_TEACHER_EP-$TEACHER_EP}" "${MATH_TEACHER_GPU_MEM_UTIL:-$TEACHER_GPU_MEM_UTIL}"
 fi
-
-EXTRA+=(
-    "+ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_CUDA_ALLOC_CONF='${PYTORCH_CUDA_ALLOC_CONF}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE='${P2P_HCCL_BUFFSIZE}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.OMP_NUM_THREADS='${OMP_NUM_THREADS}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.MKL_NUM_THREADS='${MKL_NUM_THREADS}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.NUMEXPR_NUM_THREADS='${NUMEXPR_NUM_THREADS}'"
-    "+ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT='${VERL_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER='${ASCEND_CHECKPOINT_WRITER}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_ROOT='${MINDSPEED_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY:-error}'"
-)
 
 ########################### launch ###########################
 LOG_DIR="${LOG_DIR:-/path/to/k26_full_mopd_fullvocab}"

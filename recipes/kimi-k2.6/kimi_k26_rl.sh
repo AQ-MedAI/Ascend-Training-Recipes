@@ -5,55 +5,33 @@
 set -xeuo pipefail
 K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
-RECIPE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-export VERL_ROOT="${VERL_ROOT:-$RECIPE_ROOT/third_party/verl}"
-export PYTHONPATH="$VERL_ROOT:${PYTHONPATH:-}"
-
-# ------------------------- Environment -------------------------
-# NPU/HCCL defaults. Override from the shell when cluster settings differ.
-export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-max_split_size_mb:256}"
-# Set to 1 only while locating asynchronous NPU operator failures.
-export ASCEND_LAUNCH_BLOCKING="${ASCEND_LAUNCH_BLOCKING:-0}"
-export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:False}"
-export HCCL_BUFFSIZE="${HCCL_BUFFSIZE:-200}"
-export GROUP_HCCL_BUFFER_SIZE="${GROUP_HCCL_BUFFER_SIZE:-200}"
-export P2P_HCCL_BUFFSIZE="${P2P_HCCL_BUFFSIZE:-0}"
-export HCCL_OP_EXPANSION_MODE="${HCCL_OP_EXPANSION_MODE:-AIV}"
-export OMP_NUM_THREADS="${OMP_NUM_THREADS:-6}"
-export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
-export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
-export CUDA_LAUNCH_BLOCKING="${CUDA_LAUNCH_BLOCKING:-0}"
-export HYBRID_IGNORE_LOAD_CHECK="${HYBRID_IGNORE_LOAD_CHECK:-1}"
-export USE_MAX_V2="${USE_MAX_V2:-0}"
-export HCCL_CONNECT_TIMEOUT="${HCCL_CONNECT_TIMEOUT:-1500}"
-export HCCL_NPU_SOCKET_PORT_RANGE="${HCCL_NPU_SOCKET_PORT_RANGE:-auto}"
-export HCCL_HOST_SOCKET_PORT_RANGE="${HCCL_HOST_SOCKET_PORT_RANGE:-auto}"
-export NCCL_ALGO="${NCCL_ALGO:-Ring}"
+source "$K26_SCRIPT_DIR/common_env.sh"
 
 # ------------------------- Paths -------------------------
 EXP_NAME="${EXP_NAME:-kimi_k26}"
 MODEL_PATH="${MODEL_PATH:-/path/to/Kimi-K2.6_bf16}"
-TRAIN_FILES="${TRAIN_FILES:-/path/to/k26_rl_train.parquet}"
-VAL_FILES="${VAL_FILES:-/path/to/k26_rl_valid.parquet}"
-REWARD_FN_PATH="${REWARD_FN_PATH:-/path/to/k26_rl_reward.py}"
+DATA_ROOT="${DATA_ROOT:-/workspace-verl/data}"
+TRAIN_FILES="${TRAIN_FILES:-${DATA_ROOT}/k26_rl/train.parquet}"
+VAL_FILES="${VAL_FILES:-${DATA_ROOT}/k26_rl/test.parquet}"
+REWARD_FN_PATH="${REWARD_FN_PATH:-${DATA_ROOT}/k26_rl_reward.py}"
 OUTPUT_DIR="${OUTPUT_DIR:-/path/to/ckpt}"
 LOG_DIR="${LOG_DIR:-/path/to/log}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 # ------------------------- Parallelism -------------------------
 # Actor/ref use Megatron parallelism: TP=tensor, PP=pipeline, CP=context, EP=expert.
-ACTOR_TP="${ACTOR_TP:-8}"
-ACTOR_PP="${ACTOR_PP:-10}"
-ACTOR_CP="${ACTOR_CP:-8}"
-ACTOR_EP="${ACTOR_EP:-64}"
-ACTOR_ETP="${ACTOR_ETP:-1}"
+ACTOR_TP="${ACTOR_TP:-${TP:-8}}"
+ACTOR_PP="${ACTOR_PP:-${PP:-10}}"
+ACTOR_CP="${ACTOR_CP:-${CP:-8}}"
+ACTOR_EP="${ACTOR_EP:-${EP:-64}}"
+ACTOR_ETP="${ACTOR_ETP:-${ETP:-1}}"
 
-# Rollout uses vLLM parallelism. Leave ROLLOUT_EP empty unless the backend requires expert parallelism.
-ROLLOUT_TP="${ROLLOUT_TP:-8}"
+# Rollout uses the common K26 vLLM topology; an explicitly empty EP omits the override.
+ROLLOUT_TP="${ROLLOUT_TP:-${GEN_TP:-8}}"
 ROLLOUT_DP="${ROLLOUT_DP:-16}"
-ROLLOUT_EP="${ROLLOUT_EP:-}"
+ROLLOUT_EP="${ROLLOUT_EP-128}"
 
-GPUS_PER_NODE="${GPUS_PER_NODE:-16}"
+GPUS_PER_NODE="${GPUS_PER_NODE:-${NGPUS_PER_NODE:-16}}"
 NNODES="${NNODES:-40}"
 
 # ------------------------- Data And Lengths -------------------------
@@ -91,9 +69,9 @@ ROLLOUT_NAME="${ROLLOUT_NAME:-vllm}"
 TEMPERATURE="${TEMPERATURE:-1.0}"
 TOP_P="${TOP_P:-1.0}"
 TOP_K="${TOP_K:-1000000}"
-ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
+ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-${ROLLOUT_GPU_MEM_UTIL:-0.4}}"
 ROLLOUT_MAX_NUM_SEQS="${ROLLOUT_MAX_NUM_SEQS:-32}"
-ROLLOUT_MAX_NUM_BATCHED_TOKENS="${ROLLOUT_MAX_NUM_BATCHED_TOKENS:-1024}"
+ROLLOUT_MAX_NUM_BATCHED_TOKENS="${ROLLOUT_MAX_NUM_BATCHED_TOKENS:-${MAX_NUM_BATCHED_TOKENS:-2048}}"
 ROLLOUT_SCHEDULING_POLICY="${ROLLOUT_SCHEDULING_POLICY:-fcfs}"
 ROLLOUT_DTYPE="${ROLLOUT_DTYPE:-bfloat16}"
 
@@ -114,7 +92,7 @@ TOTAL_TRAINING_STEPS="${TOTAL_TRAINING_STEPS:-1145}"
 
 # ------------------------- Tracking -------------------------
 # open-instruct uses --with_tracking; verl enables the same behavior through trainer.logger.
-WITH_TRACKING="${WITH_TRACKING:-true}"
+WITH_TRACKING="${WITH_TRACKING:-false}"
 PROJECT_NAME="${PROJECT_NAME:-kimi_k26_verl}"
 WANDB_MODE="${WANDB_MODE:-offline}"
 WANDB_DIR="${WANDB_DIR:-${OUTPUT_DIR%/}/wandb}"
@@ -144,6 +122,12 @@ DATA=(
     data.train_batch_size="${TRAIN_BATCH_SIZE}"
     data.max_prompt_length="${MAX_PROMPT_LENGTH}"
     data.max_response_length="${MAX_RESPONSE_LENGTH}"
+    data.filter_overlong_prompts="${FILTER_OVERLONG_PROMPTS:-True}"
+    data.filter_overlong_prompts_workers="${FILTER_WORKERS:-4}"
+    data.truncation="${DATA_TRUNCATION:-left}"
+    data.shuffle=True
+    data.train_max_samples="${TRAIN_MAX_SAMPLES:-5000}"
+    data.val_max_samples="${VAL_MAX_SAMPLES:-1000}"
     data.trust_remote_code=True
 )
 
@@ -250,11 +234,11 @@ ROLLOUT=(
     actor_rollout_ref.rollout.temperature="${TEMPERATURE}"
     actor_rollout_ref.rollout.top_p="${TOP_P}"
     actor_rollout_ref.rollout.top_k="${TOP_K}"
-    actor_rollout_ref.rollout.enforce_eager=False
+    actor_rollout_ref.rollout.enforce_eager="${ROLLOUT_ENFORCE_EAGER:-False}"
     actor_rollout_ref.rollout.enable_chunked_prefill=False
     actor_rollout_ref.rollout.enable_prefix_caching=False
     actor_rollout_ref.rollout.calculate_log_probs=True
-    +actor_rollout_ref.rollout.engine_kwargs.vllm.cudagraph_capture_sizes=[1,4,16,32,64]
+    +actor_rollout_ref.rollout.engine_kwargs.vllm.cudagraph_capture_sizes="${ROLLOUT_CUDAGRAPH_CAPTURE_SIZES:-[1,4,8]}"
     +actor_rollout_ref.rollout.engine_kwargs.vllm.kv_cache_dtype=auto
     +actor_rollout_ref.rollout.engine_kwargs.vllm.mamba_cache_dtype=float32
 )
@@ -305,38 +289,14 @@ REWARD=(
     reward.custom_reward_function.name=compute_score
 )
 
+# Resolve the same source paths and environment as the MOPD driver.
+source "$K26_SCRIPT_DIR/runtime_env.sh"
+source "$K26_SCRIPT_DIR/ray_env.sh"
 EXTRA=(
     model_engine=megatron
-    ++ray_kwargs.ray_init.runtime_env.env_vars.HCCL_HOST_SOCKET_PORT_RANGE="'${HCCL_HOST_SOCKET_PORT_RANGE}'"
-    ++ray_kwargs.ray_init.runtime_env.env_vars.HCCL_NPU_SOCKET_PORT_RANGE="'${HCCL_NPU_SOCKET_PORT_RANGE}'"
-    ++ray_kwargs.ray_init.runtime_env.env_vars.HCCL_CONNECT_TIMEOUT="'${HCCL_CONNECT_TIMEOUT}'"
     +seed="${SEED}"
-    +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_BUFFSIZE="'${HCCL_BUFFSIZE}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.GROUP_HCCL_BUFFER_SIZE="'${GROUP_HCCL_BUFFER_SIZE}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.P2P_HCCL_BUFFSIZE="'${P2P_HCCL_BUFFSIZE}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_NPU_ALLOC_CONF="'${PYTORCH_NPU_ALLOC_CONF}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.PYTORCH_CUDA_ALLOC_CONF="'${PYTORCH_CUDA_ALLOC_CONF}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.HCCL_OP_EXPANSION_MODE="'${HCCL_OP_EXPANSION_MODE}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.OMP_NUM_THREADS="'${OMP_NUM_THREADS}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.MKL_NUM_THREADS="'${MKL_NUM_THREADS}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.NUMEXPR_NUM_THREADS="'${NUMEXPR_NUM_THREADS}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.VERL_ROOT="'${VERL_ROOT}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.PYTHONFAULTHANDLER="'${PYTHONFAULTHANDLER}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_LAUNCH_BLOCKING="'${ASCEND_LAUNCH_BLOCKING}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER="'${ASCEND_CHECKPOINT_WRITER}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.LD_LIBRARY_PATH="'${LD_LIBRARY_PATH:-}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CUSTOM_OPP_PATH="'${ASCEND_CUSTOM_OPP_PATH:-}'"
-    +ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY="'${TRANSFORMERS_VERBOSITY}'"
-)
-
-# Select the K26 runtime and propagate the same source paths to Ray workers.
-source "${K26_SCRIPT_DIR}/runtime_env.sh"
-EXTRA+=(
-    "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_ROOT='${MINDSPEED_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
-    "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY}'"
+    distillation.enabled=False
+    "${K26_RUNTIME_ENV_ARGS[@]}"
 )
 
 # ------------------------- Launch -------------------------

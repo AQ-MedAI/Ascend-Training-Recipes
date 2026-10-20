@@ -13,8 +13,24 @@
 | [kimi_k26_mopd_shared_teacher.sh](kimi_k26_mopd_shared_teacher.sh) | Shared teacher pool; at most one awake teacher |
 
 Names follow the V4 pattern: model prefix, training mode, and resource/cut-layer suffix.
-Distillation profiles retain their existing hyperparameters. Configure their model, data,
-reward, log and shared-cache paths before use; some profiles still set paths directly.
+All launchers share `common_env.sh` and the resolved Ray environment from `ray_env.sh`.
+`kimi_k26_mopd.sh` owns the common actor/optimizer/checkpoint/pipeline configuration;
+the OPD, reverse-KL and shared-teacher entries supply their task policy and teacher profile.
+Use `MODEL_PATH`, `DATA_ROOT`, `TRAIN_FILES`, `VAL_FILES`, `REWARD_FN_PATH`, `LOG_DIR`,
+`OUTPUT_DIR` and the parallelism environment variables to override defaults. Legacy
+`TP`/`PP`/`CP`/`EP`/`ETP`/`GEN_TP`/`NGPUS_PER_NODE` aliases remain supported.
+HCCL, offline/cache, allocator, thread and source-path settings are propagated to Ray workers.
+`LOGGER` defaults to console; explicit RL tracking still supports offline wandb.
+
+Task policies are preserved: OPD uses one teacher and forward-KL top-k (coefficient 1.0);
+reverse-KL uses two teachers; shared-teacher uses two replicas per teacher in a shared pool
+with one awake teacher. These three profiles disable task rewards and policy gradients
+by default and use a loss clamp of 10. The main MOPD entry keeps task rewards/policy
+gradients enabled, coefficient 0.5 and clamp 2. The reverse/shared profiles retain the
+custom `k26_rl` teacher key; point `REWARD_FN_PATH` to its scorer, or override the key,
+data and scorer together. The single-teacher profile retains automatic replica sizing.
+The two-layer smoke entries retain their own batch, step and token limits.
+`ROLLOUT_EP=""` or `TEACHER_EP=""` omits the corresponding explicit EP override.
 
 ## Two-layer RL smoke test
 

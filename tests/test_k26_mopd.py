@@ -67,6 +67,8 @@ class MopdLauncherTest(unittest.TestCase):
                 "kimi_k26_mopd_16npu_cutlayer.sh",
                 "kimi_k26_mopd.sh",
                 "pipeline_layout.py",
+                "common_env.sh",
+                "ray_env.sh",
             ):
                 shutil.copy2(RECIPE / name, recipe / name)
             (recipe / "runtime_env.sh").write_text(
@@ -130,11 +132,21 @@ class MopdLauncherTest(unittest.TestCase):
             (recipe / "kimi_k26_rl.sh").unlink()
             mopd = launch("kimi_k26_mopd_16npu_cutlayer.sh")
             for key, value in rl.items():
-                if key.startswith(("actor_rollout_ref.", "algorithm.")):
+                task_lengths = {
+                    "actor_rollout_ref.actor.ppo_max_token_len_per_gpu",
+                    "actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu",
+                    "actor_rollout_ref.rollout.max_model_len",
+                    "actor_rollout_ref.ref.log_prob_max_token_len_per_gpu",
+                }
+                if key.startswith(("actor_rollout_ref.", "algorithm.")) and key not in task_lengths:
                     self.assertEqual(mopd[key], value, key)
+            # Keep each smoke task's validated token geometry.
+            self.assertEqual(rl["data.max_prompt_length"], "8192")
+            self.assertEqual(rl["data.max_response_length"], "1")
+            self.assertEqual(mopd["data.max_prompt_length"], "1024")
+            self.assertEqual(mopd["data.max_response_length"], "1024")
+            self.assertEqual(mopd["actor_rollout_ref.actor.ppo_max_token_len_per_gpu"], "2048")
             for key in (
-                "data.max_prompt_length",
-                "data.max_response_length",
                 "data.truncation",
                 "trainer.save_freq",
                 "trainer.total_training_steps",
