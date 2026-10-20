@@ -107,6 +107,21 @@ class MopdLauncherTest(unittest.TestCase):
 
             rl = launch("kimi_k26_rl_8npu_cutlayer.sh")
             # MOPD must launch independently of the RL entry.
+            (root / "model/config.json").write_text(json.dumps({"text_config": {"num_hidden_layers": 61}}))
+            full_rl = launch(
+                "kimi_k26_rl.sh",
+                {
+                    "HCCL_HOST_SOCKET_PORT_RANGE": "60100-60200",
+                    "HCCL_NPU_SOCKET_PORT_RANGE": "61100-61200",
+                    "HCCL_CONNECT_TIMEOUT": "1800",
+                },
+            )
+            self.assertEqual(full_rl["actor_rollout_ref.actor.ppo_max_token_len_per_gpu"], "73728")
+            self.assertEqual(full_rl["actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu"], "73728")
+            worker = "ray_kwargs.ray_init.runtime_env.env_vars."
+            self.assertEqual(full_rl[worker + "HCCL_HOST_SOCKET_PORT_RANGE"], "'60100-60200'")
+            self.assertEqual(full_rl[worker + "HCCL_NPU_SOCKET_PORT_RANGE"], "'61100-61200'")
+            self.assertEqual(full_rl[worker + "HCCL_CONNECT_TIMEOUT"], "'1800'")
             (recipe / "kimi_k26_rl.sh").unlink()
             mopd = launch("kimi_k26_mopd_16npu_cutlayer.sh")
             for key, value in rl.items():
@@ -122,6 +137,9 @@ class MopdLauncherTest(unittest.TestCase):
             ):
                 self.assertEqual(mopd[key], rl[key], key)
             self.assertEqual(mopd["distillation.enabled"], "True")
+            self.assertEqual(mopd[worker + "HCCL_HOST_SOCKET_PORT_RANGE"], "'auto'")
+            self.assertEqual(mopd[worker + "HCCL_NPU_SOCKET_PORT_RANGE"], "'auto'")
+
             self.assertEqual(mopd["distillation.n_gpus_per_node"], "8")
             self.assertEqual(mopd["distillation.nnodes"], "1")
             self.assertEqual(mopd["trainer.nnodes"], "1")
@@ -149,11 +167,21 @@ class MopdLauncherTest(unittest.TestCase):
                     "MATH_TRAIN_FILE": str(root / "custom math.parquet"),
                     "GSM8K_TEACHER_MODEL": "/shared/gsm8k-teacher",
                     "REWARD_FN_PATH": "/shared/custom_reward.py",
+                    "HCCL_HOST_SOCKET_PORT_RANGE": "60100-60200",
+                    "HCCL_NPU_SOCKET_PORT_RANGE": "61100-61200",
+                    "HCCL_CONNECT_TIMEOUT": "1800",
+                    "PYTORCH_NPU_ALLOC_CONF": "max_split_size_mb:128",
+                    "HCCL_OP_EXPANSION_MODE": "HOST",
                 },
             )
             self.assertEqual(json.loads(changed["data.train_files"])[0], str(root / "custom math.parquet"))
             self.assertEqual(changed["distillation.teacher_models.gsm8k.model_path"], "/shared/gsm8k-teacher")
             self.assertEqual(changed["reward.custom_reward_function.path"], "/shared/custom_reward.py")
+            self.assertEqual(changed[worker + "HCCL_HOST_SOCKET_PORT_RANGE"], "'60100-60200'")
+            self.assertEqual(changed[worker + "HCCL_NPU_SOCKET_PORT_RANGE"], "'61100-61200'")
+            self.assertEqual(changed[worker + "HCCL_CONNECT_TIMEOUT"], "'1800'")
+            self.assertEqual(changed[worker + "PYTORCH_NPU_ALLOC_CONF"], "'max_split_size_mb:128'")
+            self.assertEqual(changed[worker + "HCCL_OP_EXPANSION_MODE"], "'HOST'")
 
             (root / "model/config.json").write_text(json.dumps({"text_config": {"num_hidden_layers": 61}}))
             full = launch("kimi_k26_mopd.sh")
@@ -177,6 +205,11 @@ class MopdLauncherTest(unittest.TestCase):
                 self.assertEqual(full[key], mopd[key], key)
             self.assertEqual(full["actor_rollout_ref.model.path"], env["MODEL_PATH"])
             self.assertEqual(full["trainer.nnodes"], "40")
+            self.assertEqual(full["actor_rollout_ref.actor.ppo_max_token_len_per_gpu"], "73728")
+            self.assertEqual(full["actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu"], "73728")
+            optimizer = "actor_rollout_ref.actor.optim.override_optimizer_config."
+            self.assertEqual(full[optimizer + "overlap_cpu_optimizer_d2h_h2d"], "False")
+
             self.assertEqual(full["trainer.n_gpus_per_node"], "16")
             self.assertEqual(full["actor_rollout_ref.actor.megatron.pipeline_model_parallel_size"], "10")
             self.assertEqual(full["data.max_prompt_length"], "65536")
@@ -192,12 +225,17 @@ class MopdLauncherTest(unittest.TestCase):
                 "kimi_k26_mopd.sh",
                 {
                     "MATH_VAL_FILE": "/shared/custom math.parquet",
+                    "TRAIN_FILES": '["/shared/explicit train.parquet"]',
+                    "VAL_FILES": '["/shared/explicit val.parquet"]',
+                    "ROLLOUT_EP": "",
                     "MATH_TEACHER_MODEL": "/shared/math-teacher",
                     "GSM8K_TEACHER_MODEL": "/shared/gsm8k-teacher",
                     "REWARD_FN_PATH": "/shared/custom_reward.py",
                 },
             )
-            self.assertEqual(json.loads(full_custom["data.val_files"])[0], "/shared/custom math.parquet")
+            self.assertEqual(json.loads(full_custom["data.train_files"]), ["/shared/explicit train.parquet"])
+            self.assertEqual(json.loads(full_custom["data.val_files"]), ["/shared/explicit val.parquet"])
+            self.assertNotIn("actor_rollout_ref.rollout.expert_parallel_size", full_custom)
             self.assertEqual(full_custom["distillation.teacher_models.math.model_path"], "/shared/math-teacher")
             self.assertEqual(full_custom["distillation.teacher_models.gsm8k.model_path"], "/shared/gsm8k-teacher")
             self.assertEqual(full_custom["reward.custom_reward_function.path"], "/shared/custom_reward.py")

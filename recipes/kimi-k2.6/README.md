@@ -217,6 +217,18 @@ by the selected Core configuration. Allocator, HCCL and thread settings are pass
 to Ray workers explicitly. RL and the MOPD smoke profile share HCCL buffer
 defaults of 200/200 MiB. Peak memory depends on topology and sequence length.
 
+HCCL host/NPU socket ranges default to `auto` in both RL and MOPD entries.
+Explicit `HCCL_HOST_SOCKET_PORT_RANGE`, `HCCL_NPU_SOCKET_PORT_RANGE` and
+`HCCL_CONNECT_TIMEOUT` overrides are passed to Ray workers. NPU allocator and
+HCCL operation-mode overrides also reach the workers without hard-coded replacements.
+Actor/log-prob token budgets cover the complete sequence before CP splitting,
+including in full-model profiles. CPU optimizer transfer overlap defaults to
+`False`; enable it explicitly only for a separately validated environment.
+
+MOPD accepts explicit `TRAIN_FILES` and `VAL_FILES` lists; when omitted, it builds
+them from the four per-dataset file variables. Set `ROLLOUT_EP` to an empty string
+to leave the rollout backend's expert-parallel default unspecified.
+
 ## Checkpoints
 
 The RL smoke test defaults to `SAVE_FREQ=1`; full-model RL defaults to `10`.
