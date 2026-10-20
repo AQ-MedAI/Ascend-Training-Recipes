@@ -107,7 +107,8 @@ The helper requires `torch` and `safetensors` in `PYTHON_BIN`'s environment.
 
 ## Two-layer MOPD smoke test
 
-`kimi_k26_mopd_16npu_cutlayer.sh` reuses `kimi_k26_rl.sh`, with the same
+`kimi_k26_mopd_16npu_cutlayer.sh` prepares the two-layer model, then calls
+`kimi_k26_mopd.sh` with smoke settings. It uses the same
 student defaults as the validated RL smoke entry:
 `ACTOR_TP=4 ACTOR_PP=1 ACTOR_CP=2 ACTOR_EP=8 ACTOR_ETP=1`.
 It keeps both decoder layers on one pipeline stage. Eight student NPUs and two
@@ -146,8 +147,8 @@ The student uses eight prompts, two samples per prompt, 8192 prompt tokens and
 one response token, with eager rollout, left truncation and prompt filtering.
 Actor/log-prob token budgets default to 8193; rollout model length is 8196 and
 the batched-token budget is 4096. CPU optimizer offload, learning rate, gradient
-offload, recomputation and synchronous checkpoint settings come from the shared
-RL launcher. The run lasts two steps, saves each step and skips validation.
+offload, recomputation and synchronous checkpoint settings are configured by
+`kimi_k26_mopd.sh` to match the validated RL smoke profile. The run lasts two steps, saves each step and skips validation.
 These short responses exercise execution and do not validate answer quality.
 
 `ACTOR_*` overrides and legacy `TP`, `PP`, `CP`, `EP`, `ETP` remain supported.
@@ -158,7 +159,7 @@ Token budgets accept `ACTOR_MAX_TOKEN_LEN_PER_GPU` and
 `USE_POLICY_GRADIENT` overrides. Default full-vocabulary distillation remains
 `forward_kl_full_vocab` with coefficient `0.5` and task rewards enabled.
 MOPD requires separate NPU validation; the completed RL run covers the student
-configuration only. Full-model launchers are unchanged.
+configuration only. The full-model MOPD entry retains its separate scale and training defaults.
 
 ## Full-model MOPD
 
@@ -179,6 +180,10 @@ bash recipes/kimi-k2.6/kimi_k26_mopd.sh
 
 The full profile retains its own scale and training defaults: 40 student nodes,
 16 NPUs per node, TP8/PP10/CP8/EP64/ETP1, 64K prompt tokens and 8K response tokens.
+Actor parallelism accepts `ACTOR_*` (or legacy `TP`/`PP`/`CP`/`EP`/`ETP`), and
+`GPUS_PER_NODE` also accepts the legacy `NGPUS_PER_NODE`. Pipeline layer splits
+are resolved from the checkpoint depth: two layers with PP1 use no endpoint
+counts, while 61 layers with PP10 use first=3 and last=2.
 It defaults to reverse-KL full-vocabulary distillation; the smoke profile uses
 forward KL. Both use task rewards, coefficient `0.5`, the K26 runtime checker and
 synchronous in-process checkpoint writing. Configure the Ray cluster and dedicated

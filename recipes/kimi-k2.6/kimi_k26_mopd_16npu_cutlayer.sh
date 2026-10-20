@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Two-layer MOPD smoke: eight student NPUs and two TP4 teachers on eight more NPUs.
-# Reuse the validated RL launcher for actor, optimizer, rollout and checkpoint settings.
+# Prepare the cropped model and launch the standard MOPD entry with smoke settings.
 set -euo pipefail
 K26_SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 export PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -40,76 +40,23 @@ export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
 export RAY_EXPERIMENTAL_NOSET_ASCEND_RT_VISIBLE_DEVICES=1
 export VLLM_USE_V1=1 TASK_QUEUE_ENABLE=0
 
-# Each parquet's data_source must match its teacher key and reward branch.
-DATA_ROOT="${DATA_ROOT:-/workspace-verl/data}"
-MATH_TRAIN_FILE="${MATH_TRAIN_FILE:-${DATA_ROOT}/math/train.parquet}"
-MATH_VAL_FILE="${MATH_VAL_FILE:-${DATA_ROOT}/math/test.parquet}"
-GSM8K_TRAIN_FILE="${GSM8K_TRAIN_FILE:-${DATA_ROOT}/gsm8k/train.parquet}"
-GSM8K_VAL_FILE="${GSM8K_VAL_FILE:-${DATA_ROOT}/gsm8k/test.parquet}"
-export TRAIN_FILES="$("$PYTHON_BIN" -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$MATH_TRAIN_FILE" "$GSM8K_TRAIN_FILE")"
-export VAL_FILES="$("$PYTHON_BIN" -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$MATH_VAL_FILE" "$GSM8K_VAL_FILE")"
-export REWARD_FN_PATH="${REWARD_FN_PATH:-${K26_SCRIPT_DIR}/multi_reward.py}"
+# Data, reward routing and teacher definitions are maintained by kimi_k26_mopd.sh.
+export TEACHER_NNODES=1
+export TEACHER_TP="${TEACHER_TP:-4}"
+export TEACHER_NUM_REPLICAS_MATH="${TEACHER_NUM_REPLICAS_MATH:-1}"
+export TEACHER_NUM_REPLICAS_GSM8K="${TEACHER_NUM_REPLICAS_GSM8K:-1}"
+export TEACHER_GPUS_PER_NODE=$(( (TEACHER_NUM_REPLICAS_MATH + TEACHER_NUM_REPLICAS_GSM8K) * TEACHER_TP ))
+export TEACHER_DP=1 TEACHER_PCP=1 TEACHER_EP=""
+export TEACHER_GPU_MEM_UTIL="${TEACHER_GPU_MEM_UTIL:-0.5}"
+export TEACHER_ENFORCE_EAGER=True
+export TEACHER_MAX_MODEL_LEN="$MAX_MODEL_LEN"
+export VERL_TEACHER_DEDICATED_RACK=0
+export DISTILLATION_LOSS_MODE="${DISTILLATION_LOSS_MODE:-forward_kl_full_vocab}"
+export FULL_VOCAB_CHUNK_TOKENS="${FULL_VOCAB_CHUNK_TOKENS:-2048}"
+export OVERLAP_CPU_OPTIMIZER_D2H_H2D="${OVERLAP_CPU_OPTIMIZER_D2H_H2D:-False}"
+export ROLLOUT_GPU_MEMORY_UTILIZATION="${ROLLOUT_GPU_MEMORY_UTILIZATION:-0.5}"
+export ROLLOUT_ENFORCE_EAGER=True
+export ROLLOUT_CUDAGRAPH_CAPTURE_SIZES='[1,4,16,32,64]'
+export TRAIN_MAX_SAMPLES="${TRAIN_MAX_SAMPLES:-8}" VAL_MAX_SAMPLES="${VAL_MAX_SAMPLES:-8}"
 
-# Smoke teachers reuse the cropped checkpoint; overrides must share its vocabulary.
-MATH_TEACHER_MODEL="${MATH_TEACHER_MODEL:-${MODEL_PATH}}"
-GSM8K_TEACHER_MODEL="${GSM8K_TEACHER_MODEL:-${MODEL_PATH}}"
-teacher_tp="${TEACHER_TP:-4}"
-math_replicas="${TEACHER_NUM_REPLICAS_MATH:-1}"
-gsm8k_replicas="${TEACHER_NUM_REPLICAS_GSM8K:-1}"
-teacher_world_size=$(( (math_replicas + gsm8k_replicas) * teacher_tp ))
-
-MOPD=(
-    distillation.enabled=True
-    distillation.n_gpus_per_node="$teacher_world_size"
-    distillation.nnodes=1
-    distillation.teacher_key=data_source
-    +distillation.teacher_models.math.key=DigitalLearningGmbH/MATH-lighteval
-    +distillation.teacher_models.math.model_path="$MATH_TEACHER_MODEL"
-    +distillation.teacher_models.math.num_replicas="$math_replicas"
-    +distillation.teacher_models.gsm8k.key=openai/gsm8k
-    +distillation.teacher_models.gsm8k.model_path="$GSM8K_TEACHER_MODEL"
-    +distillation.teacher_models.gsm8k.num_replicas="$gsm8k_replicas"
-)
-for teacher in math gsm8k; do
-    MOPD+=(
-        "+distillation.teacher_models.${teacher}.inference.name=vllm"
-        "+distillation.teacher_models.${teacher}.inference.enforce_eager=True"
-        "+distillation.teacher_models.${teacher}.inference.tensor_model_parallel_size=${teacher_tp}"
-        "+distillation.teacher_models.${teacher}.inference.gpu_memory_utilization=${TEACHER_GPU_MEM_UTIL:-0.5}"
-        "+distillation.teacher_models.${teacher}.inference.enable_chunked_prefill=False"
-        "+distillation.teacher_models.${teacher}.inference.max_num_seqs=1"
-        "+distillation.teacher_models.${teacher}.inference.max_model_len=${MAX_MODEL_LEN}"
-        "+distillation.teacher_models.${teacher}.inference.max_num_batched_tokens=${MAX_MODEL_LEN}"
-    )
-done
-MOPD+=(
-    distillation.distillation_loss.loss_mode="${DISTILLATION_LOSS_MODE:-forward_kl_full_vocab}"
-    distillation.distillation_loss.full_vocab_chunk_tokens="${FULL_VOCAB_CHUNK_TOKENS:-2048}"
-    distillation.distillation_loss.topk="${DISTILLATION_TOPK:-64}"
-    distillation.distillation_loss.use_task_rewards=True
-    distillation.distillation_loss.use_policy_gradient="${USE_POLICY_GRADIENT:-True}"
-    distillation.distillation_loss.loss_max_clamp=2.0
-    distillation.distillation_loss.log_prob_min_clamp=-10.0
-    distillation.distillation_loss.distillation_loss_coef="${DISTILLATION_LOSS_COEF:-0.5}"
-)
-
-
-# Propagate additional teacher/native runtime settings alongside the RL environment.
-for name in HF_HUB_OFFLINE TRANSFORMERS_OFFLINE VLLM_USE_V1 TASK_QUEUE_ENABLE \
-    ASCEND_HOME_PATH ASCEND_OPP_PATH ASCEND_AICPU_PATH ASCEND_TOOLKIT_HOME \
-    ASCEND_TOOLKIT_LATEST_HOME ATB_HOME_PATH TOOLCHAIN_HOME CMAKE_PREFIX_PATH ASCEND_RUNTIME_OPTIONS; do
-    value="${!name:-}"
-    if [[ -n "$value" ]]; then
-        MOPD+=("++ray_kwargs.ray_init.runtime_env.env_vars.${name}='${value}'")
-    fi
-done
-
-exec bash "$K26_SCRIPT_DIR/kimi_k26_rl.sh" \
-    data.truncation="${DATA_TRUNCATION:-left}" \
-    data.filter_overlong_prompts="${FILTER_OVERLONG_PROMPTS:-True}" \
-    data.filter_overlong_prompts_workers="${FILTER_WORKERS:-4}" \
-    data.train_max_samples="${TRAIN_MAX_SAMPLES:-8}" \
-    data.val_max_samples="${VAL_MAX_SAMPLES:-8}" \
-    trainer.val_before_train=False \
-    actor_rollout_ref.rollout.enforce_eager=True \
-    "${MOPD[@]}" "$@"
+exec bash "$K26_SCRIPT_DIR/kimi_k26_mopd.sh" "$@"

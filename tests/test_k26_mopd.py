@@ -106,6 +106,8 @@ class MopdLauncherTest(unittest.TestCase):
                 return dict(arg.lstrip("+").split("=", 1) for arg in json.loads(Path(env["CAPTURE"]).read_text()))
 
             rl = launch("kimi_k26_rl_8npu_cutlayer.sh")
+            # MOPD must launch independently of the RL entry.
+            (recipe / "kimi_k26_rl.sh").unlink()
             mopd = launch("kimi_k26_mopd_16npu_cutlayer.sh")
             for key, value in rl.items():
                 if key.startswith(("actor_rollout_ref.", "algorithm.")):
@@ -121,6 +123,16 @@ class MopdLauncherTest(unittest.TestCase):
                 self.assertEqual(mopd[key], rl[key], key)
             self.assertEqual(mopd["distillation.enabled"], "True")
             self.assertEqual(mopd["distillation.n_gpus_per_node"], "8")
+            self.assertEqual(mopd["distillation.nnodes"], "1")
+            self.assertEqual(mopd["trainer.nnodes"], "1")
+            self.assertEqual(mopd["ray_kwargs.ray_init.runtime_env.env_vars.VERL_TEACHER_DEDICATED_RACK"], "'0'")
+            for teacher in ("math", "gsm8k"):
+                prefix = f"distillation.teacher_models.{teacher}.inference."
+                self.assertEqual(mopd[prefix + "tensor_model_parallel_size"], "4")
+                self.assertEqual(mopd[prefix + "data_parallel_size"], "1")
+                self.assertEqual(mopd[prefix + "enforce_eager"], "True")
+                self.assertNotIn(prefix + "expert_parallel_size", mopd)
+
             self.assertEqual(mopd["distillation.teacher_models.math.key"], "DigitalLearningGmbH/MATH-lighteval")
             self.assertEqual(mopd["distillation.teacher_models.gsm8k.key"], "openai/gsm8k")
             self.assertEqual(mopd["reward.custom_reward_function.path"], str(recipe / "multi_reward.py"))
@@ -143,6 +155,7 @@ class MopdLauncherTest(unittest.TestCase):
             self.assertEqual(changed["distillation.teacher_models.gsm8k.model_path"], "/shared/gsm8k-teacher")
             self.assertEqual(changed["reward.custom_reward_function.path"], "/shared/custom_reward.py")
 
+            (root / "model/config.json").write_text(json.dumps({"text_config": {"num_hidden_layers": 61}}))
             full = launch("kimi_k26_mopd.sh")
             for key, value in rl.items():
                 if key.startswith("algorithm."):
@@ -169,6 +182,10 @@ class MopdLauncherTest(unittest.TestCase):
             self.assertEqual(full["data.max_prompt_length"], "65536")
             self.assertEqual(full["data.max_response_length"], "8192")
             self.assertEqual(full["distillation.distillation_loss.loss_mode"], "reverse_kl_full_vocab")
+            prefix = "actor_rollout_ref.actor.megatron.override_transformer_config."
+            self.assertEqual(full[prefix + "num_layers_in_first_pipeline_stage"], "3")
+            self.assertEqual(full[prefix + "num_layers_in_last_pipeline_stage"], "2")
+
             self.assertEqual(full["actor_rollout_ref.actor.checkpoint.async_save"], "False")
             self.assertEqual(full["ray_kwargs.ray_init.runtime_env.env_vars.ASCEND_CHECKPOINT_WRITER"], "'inprocess'")
             full_custom = launch(
