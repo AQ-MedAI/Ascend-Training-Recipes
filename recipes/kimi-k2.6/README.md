@@ -91,8 +91,8 @@ prompts and two samples per prompt. Actor parallelism can be overridden through
 Other smoke settings remain fixed and Hydra overrides are rejected. It disables distillation and initial
 validation, and requests a checkpoint every training step. Success requires two
 training steps, including rollout, backward/optimizer execution and subsequent
-rollout weight updates. This RL topology has completed runtime testing; other
-topologies and MOPD require separate validation.
+rollout weight updates. The two-layer RL and MOPD smoke recipes have completed runtime testing;
+other topologies, full-model profiles and rebuilt images require separate validation.
 
 The prompt limit is 8192 tokens and the response limit is one token. Prompts use
 left truncation and overlong-prompt filtering by default; override these policies
@@ -225,13 +225,21 @@ Teacher distillation is configured separately through `distillation.distillation
 
 ## Image preparation
 
-See [K26 image adaptation](../../docker/k26/README.md). The public Core/Bridge
-baselines are pinned, but the new image is currently a source-only candidate.
-RL and both MOPD launchers validate the selected Core/Bridge paths
-through `runtime_env.sh`; set `MEGATRON_ROOT` and `MEGATRON_BRIDGE_ROOT` when
-using an existing compatible K26 environment.
+See [K26 training image](../../docker/k26/README.md) for the build command.
+The image reuses the compiled Python 3.11 V4/V4.1 runtime, replaces the K26
+training dependencies and bundles this recipe. All selected framework sources
+live under `/opt/ascend-training/third_party`; no preparation command is needed
+inside the image. Its entrypoint sets `MINDSPEED_ROOT`, `MEGATRON_ROOT`,
+`MEGATRON_BRIDGE_ROOT`, `VERL_ROOT` and the inference source paths.
 
-For the external K2.6 Megatron baseline, apply the [optional TE compatibility patch](../../patches/megatron-lm/k26/README.md) to `/opt/ascend-training/Megatron-LM` before sourcing `runtime_env.sh`. The patch enables import with an incomplete TE shim for non-FP8 execution; it does not provide FP8 support.
+When using an external container, retain the explicit environment overrides for
+its prepared dependencies. `runtime_env.sh` checks the actual MindSpeed,
+Core/Bridge imports and BF16 interfaces before launching training. Changing source
+paths requires fresh training processes and teacher workers.
+
+The two-layer RL and MOPD recipes have passed runtime testing. A new image must
+still pass two training steps, checkpoint save and rollout weight updates;
+checkpoint resume remains a separate acceptance test.
 
 ## Runtime policy
 

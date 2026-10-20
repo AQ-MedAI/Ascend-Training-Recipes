@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Reconstruct the public K26 training baseline. Internal adaptations are not included.
-set -euo pipefail
-python3 - <<'FETCH'
-import json
-import subprocess
-from pathlib import Path
-root = Path('/opt/ascend-training')
-manifest = json.loads((root / 'manifest/k26-sources.json').read_text())
-for name, source in manifest['sources'].items():
-    target = root / name
-    subprocess.run(['git', 'init', str(target)], check=True)
-    subprocess.run(['git', '-C', str(target), 'remote', 'add', 'origin', source['repository']], check=True)
-    subprocess.run(['git', '-C', str(target), 'fetch', '--depth=1', 'origin', source['commit']], check=True)
-    subprocess.run(['git', '-C', str(target), 'checkout', '--detach', 'FETCH_HEAD'], check=True)
-    actual = subprocess.check_output(['git', '-C', str(target), 'rev-parse', 'HEAD'], text=True).strip()
-    if actual != source['commit']:
-        raise RuntimeError(f'Unexpected source revision: {name}: {actual}')
-# Source-only stage: installation/import validation requires the pending K26 dependency lock.
-(root / 'manifest/k26-build-status.json').write_text(json.dumps({
-    'stage': 'public-training-sources', 'runtime_validated': False,
-    'unresolved': manifest['unresolved'],
-}, indent=2) + '\n')
-FETCH
+# Reuse compiled rollout dependencies and install the pinned K26 training sources.
+set -Eeo pipefail
+trap 'status=$?; printf "K26 build failed at line %s (exit %s)\n" "$LINENO" "$status" >&2' ERR
+ROOT=/opt/ascend-training
+SOURCES=$ROOT/third_party
+INPUT=/tmp/k26-image-build
+PYTHON_BIN="${PYTHON_BIN:-/usr/local/python3.11.15/bin/python3}"
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+source /usr/local/Ascend/nnal/atb/set_env.sh --cxx_abi=1
+export PATH="$(dirname "$PYTHON_BIN"):$PATH"
+set -u
+unset PYTHONPATH PYTHONHOME
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+"$PYTHON_BIN" "$INPUT/verify_runtime.py" --base
+# These editable installations are replaced together; inference packages remain installed.
+"$PYTHON_BIN" -m pip uninstall -y megatron-core megatron-bridge mindspeed verl mindspeed-llm mbridge
+for name in Megatron-LM Megatron-Bridge MindSpeed verl MindSpeed-LLM mbridge; do
+    rm -rf "$SOURCES/$name"
+done
+"$PYTHON_BIN" "$INPUT/tools/prepare_k26_image_sources.py" --root "$SOURCES" --inputs "$INPUT"
+for name in Megatron-LM Megatron-Bridge MindSpeed verl; do
+    "$PYTHON_BIN" -m pip install --no-deps --no-build-isolation -e "$SOURCES/$name"
+done

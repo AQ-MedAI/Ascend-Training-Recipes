@@ -47,7 +47,7 @@ docker run --rm -it \
 
 `setup_sources.sh v4` 和 `v41` 准备相同源码。子模块不会自动覆盖镜像内框架。上游基线、补丁和校验清单见 [依赖说明](docs/DEPENDENCIES.md)；`dependencies/registry.json` 不是完整 Python lockfile。
 
-K2.6 保留独立基线和环境适配流程，见 [K2.6](recipes/kimi-k2.6/README.md)。`setup_sources.sh k26` 只准备它的 verl，不能替代完整 K2.6 环境。
+K2.6 使用独立训练基线。[K26 镜像](docker/k26/README.md) 复用 V4/V4.1 的 Python 3.11 推理运行时，并提供匹配的 Core、Bridge、MindSpeed、verl 和 recipe。开发目录中的 `setup_sources.sh k26` 仍只准备 verl；完整环境与启动方法见 [K2.6](recipes/kimi-k2.6/README.md)。
 
 ## 使用前准备
 
