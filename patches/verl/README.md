@@ -6,7 +6,7 @@ Upstream: https://github.com/verl-project/verl.git
 | --- | --- | --- |
 | V4 | `809f2d8f59910dfd3a96745b68119829650250a0` | `v4.patch` + `v41.patch` + `entrypoint.patch` + `v4-mtp.patch` |
 | V4.1 | `809f2d8f59910dfd3a96745b68119829650250a0` | `v4.patch` + `v41.patch` + `entrypoint.patch` + `v4-mtp.patch` |
-| K2.6 RL / MOPD | `bee9f6f4bb1de784781e296f165b4c22d6c26cc1` | `k26.patch` + `k26-engine-registration.patch` |
+| K2.6 RL / MOPD | `bee9f6f4bb1de784781e296f165b4c22d6c26cc1` | `k26.patch` + `k26-engine-registration.patch` + `k26-full-vocab-rpc.patch` |
 
 V4 and V4.1 share the same final source tree: apply `v4.patch` first, then the incremental `v41.patch` and `entrypoint.patch`. `entrypoint.patch` resolves the V4 model provider from the pinned MindSpeed-LLM repository root (`pretrain_deepseek4.py`), which the launchers include in `PYTHONPATH`. Model architecture and recipe settings select the training path. Use the shared MindSpeed optimizer/checkpoint adaptations and matching Megatron-LM alongside this tree. The K2.6 patch is an alternative on its own upstream baseline; never stack it on the shared V4/V4.1 tree.
 
@@ -21,3 +21,12 @@ The source manifest also recognizes the previous V4-only tree for safe migration
 `k26-engine-registration.patch` retains the first optional engine ImportError and propagates it when the Megatron backend is selected. It never retries a partially initialized MindSpeed module; retrying can duplicate torch.compile patch registration. The runtime preflight initializes MindSpeed before Core/Bridge imports. Missing dependencies still need to be fixed in the selected environment.
 
 `v4-mtp.patch` follows the shared V4/V4.1 stack. It preserves the MindSpeed engine config object during conversion, validates V4 MTP options and uses the native V4 auxiliary loss while returning PPO logits. It is not applied to K2.6.
+
+`k26-full-vocab-rpc.patch` transports captured teacher hidden states as an explicit
+dtype/shape/byte payload. vLLM 0.23 utility RPC does not reconstruct untyped Tensor
+results with its default serialization settings; treating that descriptor as a
+missing capture incorrectly aborts full-vocabulary distillation. The payload uses
+native MessagePack values, validates its dtype, shape and byte count, and retains
+compatibility with direct Tensor results. It does not enable pickle serialization.
+Run `bash tools/setup_sources.sh k26` to update a prepared K26 tree, then restart
+the training driver and teacher workers.

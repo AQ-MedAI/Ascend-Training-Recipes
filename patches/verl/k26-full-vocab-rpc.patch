@@ -1,0 +1,75 @@
+diff --git a/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py b/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
+--- a/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
++++ b/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
+@@ -145,6 +145,42 @@
+         delattr(model_runner, _CAPTURED_HIDDEN_ATTR)
+ 
+ 
++def _encode_hidden_payload(hidden: torch.Tensor) -> dict[str, Any]:
++    """Use native MessagePack values; untyped vLLM utility RPC loses Tensor types."""
++    if hidden.dim() != 2 or hidden.dtype not in (torch.bfloat16, torch.float16, torch.float32):
++        raise ValueError(f"Unsupported full-vocab hidden tensor: shape={tuple(hidden.shape)}, dtype={hidden.dtype}")
++    if any(size < 1 for size in hidden.shape):
++        raise ValueError(f"Empty full-vocab hidden tensor: {tuple(hidden.shape)}")
++    hidden = hidden.detach().to("cpu").contiguous()
++    return {
++        "format": "verl.full_vocab_hidden.v1",
++        "dtype": str(hidden.dtype).removeprefix("torch."),
++        "shape": list(hidden.shape),
++        "data": hidden.view(torch.uint8).numpy().tobytes(),
++    }
++
++
++def _decode_hidden_payload(payload: dict[str, Any]) -> torch.Tensor:
++    """Validate an explicit wire format without pickle or raw tensor descriptors."""
++    dtypes = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
++    dtype_name, shape, data = payload.get("dtype"), payload.get("shape"), payload.get("data")
++    if not isinstance(dtype_name, str) or dtype_name not in dtypes:
++        raise ValueError(f"Unsupported full-vocab hidden dtype: {dtype_name!r}")
++    if (
++        not isinstance(shape, (list, tuple))
++        or len(shape) != 2
++        or any(type(size) is not int or size < 1 for size in shape)
++    ):
++        raise ValueError(f"Invalid full-vocab hidden shape: {shape!r}")
++    dtype = dtypes[dtype_name]
++    expected = shape[0] * shape[1] * torch.empty((), dtype=dtype).element_size()
++    if not isinstance(data, bytes) or len(data) != expected:
++        raise ValueError(f"Invalid full-vocab hidden data: expected {expected} bytes")
++    # Own a writable buffer so the result survives RPC-buffer reuse and supports
++    # downstream operations without exposing immutable MessagePack memory.
++    return torch.frombuffer(bytearray(data), dtype=dtype).reshape(shape)
++
++
+ def unwrap_captured_hidden(rpc_result: Any) -> Optional[torch.Tensor]:
+     """Pick the rank-0 capture out of a ``collective_rpc`` result.
+ 
+@@ -154,6 +190,8 @@
+     pre-lm_head hidden states, so the first non-None tensor (rank 0) is the one
+     to use. Returns None if no worker captured anything.
+     """
++    if isinstance(rpc_result, dict) and rpc_result.get("format") == "verl.full_vocab_hidden.v1":
++        return _decode_hidden_payload(rpc_result)
+     if isinstance(rpc_result, torch.Tensor):
+         return rpc_result
+     if isinstance(rpc_result, (list, tuple)):
+@@ -181,8 +219,8 @@
+         """
+         install_hidden_capture(self.model_runner)
+ 
+-    def fetch_captured_hidden(self) -> Optional[torch.Tensor]:
+-        """Return this worker's captured CPU hidden states (or None).
++    def fetch_captured_hidden(self) -> Optional[dict[str, Any]]:
++        """Return captured CPU hidden states in a typed byte payload (or None).
+ 
+         Consume-once: the buffer is cleared so a stale capture can never leak
+         into the next request.
+@@ -190,7 +228,7 @@
+         runner = self.model_runner
+         hidden = getattr(runner, _CAPTURED_HIDDEN_ATTR, None)
+         setattr(runner, _CAPTURED_HIDDEN_ATTR, None)
+-        return hidden
++        return _encode_hidden_payload(hidden) if hidden is not None else None
+ 
+ 
+ def export_hidden_to_tq(
