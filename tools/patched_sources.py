@@ -52,15 +52,25 @@ def inspect_checkout(checkout, sources):
     if not git(checkout, "status", "--porcelain"):
         return None
     head = source_commit(checkout)
+    failures = []
     for index, source in enumerate(sources):
         if head != source["commit"]:
             continue
         try:
             verify(checkout, source, tracked=True)
             return index
-        except (RuntimeError, OSError):
-            pass
-    raise RuntimeError(f"Local changes differ from every managed profile: {checkout}; preserve them before updating")
+        except (RuntimeError, OSError) as exc:
+            detail = str(exc)
+            if detail not in failures:
+                failures.append(detail)
+    details = "\n".join(f"  - {detail}" for detail in failures)
+    if not details:
+        details = f"  - No managed profile matches upstream commit {head}"
+    raise RuntimeError(
+        f"Local changes differ from every managed profile: {checkout}; preserve them before updating\n"
+        f"Verification failures for this upstream commit:\n{details}\n"
+        "No source files were changed."
+    )
 
 
 def is_prepared(checkout, source):

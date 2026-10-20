@@ -61,8 +61,11 @@ class PatchedSourceTest(unittest.TestCase):
     def test_user_edit_is_preserved(self):
         ensure_source(self.repo, self.source, self.patch)
         (self.repo / "model.py").write_text("user changes\n")
-        with self.assertRaisesRegex(RuntimeError, "Local changes"):
+        with self.assertRaisesRegex(RuntimeError, "Local changes") as error:
             ensure_source(self.repo, self.source, self.patch)
+        self.assertIn("Source checksum or mode mismatch", str(error.exception))
+        self.assertIn("model.py", str(error.exception))
+        self.assertIn("No source files were changed", str(error.exception))
         self.assertEqual((self.repo / "model.py").read_text(), "user changes\n")
 
     def test_staged_changes_are_preserved(self):
@@ -115,8 +118,9 @@ class PatchedSourceTest(unittest.TestCase):
     def test_switch_preserves_extra_edit(self):
         second, patches = self.make_second_profile()
         (self.repo / "user.py").write_text("user content")
-        with self.assertRaisesRegex(RuntimeError, "Local changes"):
+        with self.assertRaisesRegex(RuntimeError, "Local changes") as error:
             ensure_source(self.repo, second, patches, [(self.source, [self.patch])])
+        self.assertIn("extra=[\'user.py\']", str(error.exception))
         self.assertEqual((self.repo / "user.py").read_text(), "user content")
         self.assertEqual((self.repo / "model.py").read_text(), "adapted\n")
 
