@@ -10,8 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-export USE_CUT_MODEL_OVERLAY=False
-export MODEL_PATH=/tmp/dsv4_flash_bf16_4layers_model
+export USE_CUT_MODEL_OVERLAY="${USE_CUT_MODEL_OVERLAY:-True}"
 export DISTILLATION_ENABLED=False
 export ASCEND_RT_VISIBLE_DEVICES="${RL_ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 export GPUS_PER_NODE="${GPUS_PER_NODE:-8}"

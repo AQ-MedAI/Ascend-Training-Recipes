@@ -4,8 +4,6 @@
     "mbridge": {
       "repository": "https://github.com/ISEEKYAN/mbridge.git",
       "commit": "0cd4ae23f2425da77a80cb3f517828452fa8e984",
-      "patch": "../patches/mbridge/ascend-training.patch",
-      "patch_sha256": "95a9c92486d36576b252cca198c01cdebeb82c918394b6d6548a3b646a0a095c",
       "reference_files": {
         ".github/workflows/publish-to-pypi.yml": {
           "sha256": "df873e5d91dbc8428817f9a6df650756c4da9574e2e18b8a17109a3608897fad",
@@ -550,7 +548,7 @@
           "executable": false
         },
         "mbridge/models/deepseek_v3.py": {
-          "sha256": "6b7dd622fbe9767401ccbf34239be6e2c9787292c0ad1d91353d09cb01b1fc86",
+          "sha256": "73cf961332a3d8d447edd8f0573275517216dc89fce9d5e502ce221479726c88",
           "executable": false
         },
         "mbridge/models/deepseek_v41.py": {
@@ -817,7 +815,839 @@
           "sha256": "21f48e7f12b3c835fadae9700445a4d453d4bf42037ae88f7fc8fe582f1b97e6",
           "executable": false
         }
-      }
+      },
+      "patches": [
+        {
+          "path": "../patches/mbridge/ascend-training.patch",
+          "sha256": "95a9c92486d36576b252cca198c01cdebeb82c918394b6d6548a3b646a0a095c"
+        },
+        {
+          "path": "../patches/mbridge/v4-mtp.patch",
+          "sha256": "1d690996388641a07cc1616c040d8532203db5a3cfbda8d90125fdf1682a4b18"
+        }
+      ]
     }
+  },
+  "legacy_sources": {
+    "mbridge": [
+      {
+        "repository": "https://github.com/ISEEKYAN/mbridge.git",
+        "commit": "0cd4ae23f2425da77a80cb3f517828452fa8e984",
+        "patch": "../patches/mbridge/ascend-training.patch",
+        "patch_sha256": "95a9c92486d36576b252cca198c01cdebeb82c918394b6d6548a3b646a0a095c",
+        "reference_files": {
+          ".github/workflows/publish-to-pypi.yml": {
+            "sha256": "df873e5d91dbc8428817f9a6df650756c4da9574e2e18b8a17109a3608897fad",
+            "executable": false
+          },
+          ".github/workflows/run-tests.yml": {
+            "sha256": "93b74eef5f3c073522169284c41b8af613f1ccc2fb8ab281d2f21c0d3387e3ae",
+            "executable": false
+          },
+          ".gitignore": {
+            "sha256": "0e63ac136cf12a613c7987775d2d32f756717b3b0068a7f8153fc793a3126e54",
+            "executable": false
+          },
+          "CONTRIBUTING.md": {
+            "sha256": "b57c24c439781d63541ae9c0dfccb7462ac32193b2af1fc60ad921e47fe49a02",
+            "executable": false
+          },
+          "LICENSE": {
+            "sha256": "47d79af994c89a23f2848a1f84467c5afd8f297fc58f098b34143f96efc06b77",
+            "executable": false
+          },
+          "README.md": {
+            "sha256": "b04e1d2d1b56416d7c40fb072d459db18a10182cae56beee1d73c544ef2a9a1b",
+            "executable": false
+          },
+          "README.zh-CN.md": {
+            "sha256": "916d332119353c1bbec28ecaadf22978de6ebe6f2c90737deb04d29a8710353a",
+            "executable": false
+          },
+          "example/0.load_model_and_generate_single_gpu.py": {
+            "sha256": "9ae9d2000d0733907587f6f99f654a5ac44e180a7e57772f073466df75f83c65",
+            "executable": false
+          },
+          "example/1.load_model_and_export_single_gpu.py": {
+            "sha256": "83341a5fdde723da646d99ca2ec4a8acbe944a8a7ea8a14f7e4062b032c4a2b4",
+            "executable": false
+          },
+          "example/2.load_model_and_export_multiple_gpus.py": {
+            "sha256": "054bd6de34d9b0ddbf1f7d634ae58dae8f6cdf509daedb8b87868ec923e14907",
+            "executable": false
+          },
+          "example/3.launch_megatron_with_ray.py": {
+            "sha256": "ea9faf8e353acff7a7e9dcf019c272c1ee491f35b139f3f43c8fc452ebcd8add",
+            "executable": false
+          },
+          "example/4.launch_deepseekv3_with_ray.py": {
+            "sha256": "9c634b7f974be6462715ebca0ed07feb3b816be8e21582487c857e60317af5cd",
+            "executable": false
+          },
+          "example/gemma3/load_model_and_forward.py": {
+            "sha256": "86bbac9f2c2f1a824ac6745e1646143d9603c467a7eeb6cf45cf117378179557",
+            "executable": false
+          },
+          "example/gemma3/load_model_and_inference.py": {
+            "sha256": "33f28cb418b48cef45bdfb199beb95c30a44d8e2879d4f5b7126d248de038e0b",
+            "executable": false
+          },
+          "example/gemma3/run_test.sh": {
+            "sha256": "f01c7a4e8327355b33b416f9e282e43416dd304e3bf684ef0b364b5c2db9c52a",
+            "executable": false
+          },
+          "example/glm4v/README.md": {
+            "sha256": "92f6762cef763d557559b7909ccecf712f22c2f32f368352a0f6b7de1279da6b",
+            "executable": false
+          },
+          "example/glm4v/_test_mrope_hf_vs_megatron.py": {
+            "sha256": "5d4587cd7e172603d98a20033fe9d67a6a2f8637b6d1d503640b93635c0cea6e",
+            "executable": false
+          },
+          "example/glm4v/load_model_and_export.py": {
+            "sha256": "8b26b2df284f451df61d7ffe46093ae2200912448f39878b708dd07bc2201c38",
+            "executable": false
+          },
+          "example/glm4v/load_model_and_forward.py": {
+            "sha256": "20f4e431840d82de132a14fd44b6f52b42742c74ceb3d76e07cd5cfc31f2f119",
+            "executable": false
+          },
+          "example/glm4v/load_model_and_inference.py": {
+            "sha256": "09df467a009cd289e5580d9abcd2de4d37a868ac1a15559a144367b2677f4ba6",
+            "executable": false
+          },
+          "example/internvl3/conversation.py": {
+            "sha256": "54e014777f6eb18be2564f0a9fcc4ea9e285c21cba10119fe8560333d0a4f415",
+            "executable": false
+          },
+          "example/internvl3/data_proc.py": {
+            "sha256": "d83834881333a4f57cddc9309d19c7c50dbddf10379b0ff03843734989f28f06",
+            "executable": false
+          },
+          "example/internvl3/load_model_and_forward.py": {
+            "sha256": "9ddc93c714f1bdb6383f3379d1be31faf72b7f73b28dd4b3bf9d091879c6acfc",
+            "executable": false
+          },
+          "example/internvl3/load_model_and_inference.py": {
+            "sha256": "161c75507ebfd3af65016c69e5a6fb695aa608b3b41ec48dc4677e630f7add5a",
+            "executable": false
+          },
+          "example/internvl3/run_test.sh": {
+            "sha256": "3c7c84e7d7027bf0c0ae5e542f0ee3c4338d275b893528d14ce8df8603dbcf69",
+            "executable": false
+          },
+          "mbridge/__init__.py": {
+            "sha256": "fb3977c64129606c0c7b1dec4744d29ef7d11bd3a786b5be674a28592ee711e7",
+            "executable": false
+          },
+          "mbridge/core/__init__.py": {
+            "sha256": "b55bb45c1b06cd737310866776d166dc2be44600bc044610f5d52883b2721b7a",
+            "executable": false
+          },
+          "mbridge/core/auto_bridge.py": {
+            "sha256": "a51cd0ef5668327ad74c414bf05062912c36d729b878fc94ddcd8b418f87da19",
+            "executable": false
+          },
+          "mbridge/core/bridge.py": {
+            "sha256": "85ac68c7420aef501d3d39637a65b0da84fb1dd5b5423a2ea382a720a2c59726",
+            "executable": false
+          },
+          "mbridge/core/llm_bridge.py": {
+            "sha256": "3c4200e5ef8f3f5c4b824614c1736963bd5a9da3942dfe42c173488411c04615",
+            "executable": false
+          },
+          "mbridge/core/parallel_states.py": {
+            "sha256": "3327687146481b2dd641a25b87e7506e1a696c74ba46c78dcd242919469e391c",
+            "executable": false
+          },
+          "mbridge/core/safetensor_io.py": {
+            "sha256": "bb209b580e4991a65af32cf49a49dda3b5633025b843d7084439f6db0615dc00",
+            "executable": false
+          },
+          "mbridge/core/util.py": {
+            "sha256": "9d7e65896af56c4fa02afc0890f340897ce67cf83d25b923b5ac90e4d4d7df0b",
+            "executable": false
+          },
+          "mbridge/core/vlm_bridge.py": {
+            "sha256": "e42eaa6cad6f7825b2ca4eb2c80bf36ad220a36ef79d8f8ec91d7142fbaac506",
+            "executable": false
+          },
+          "mbridge/models/__init__.py": {
+            "sha256": "5c9f440ab10e38a17f7398e076d1d481c291901c954266a2f376c861946e111a",
+            "executable": false
+          },
+          "mbridge/models/deepseek_v3.py": {
+            "sha256": "a8d7d399ac216dd0c0593c7d4c215c1e5969eee524a221846e42f35ac6b7d35a",
+            "executable": false
+          },
+          "mbridge/models/ext/deepseek_v3/dequant_fp8_safetensor_io.py": {
+            "sha256": "485085d84c9f7dfc49641f70393e008d210da92e4ed6eefa0dd83b4b3c90679e",
+            "executable": false
+          },
+          "mbridge/models/ext/deepseek_v3/kernel.py": {
+            "sha256": "52d6771a7d3688ca3afc896b69281e61888408537e37a87c8dd5a5e0dbe5774d",
+            "executable": false
+          },
+          "mbridge/models/ext/llama3_cp/cp_utils.py": {
+            "sha256": "db5ed95a03534777f96b91170c24b9cc2f5c757f1371c97be37e53e669f756d7",
+            "executable": false
+          },
+          "mbridge/models/ext/llama3_cp/llama3_cp_memory_efficient_attention.py": {
+            "sha256": "9398bb29ebdb4fcbd0e070ee7f2e222ebf98a3ac21959db77ed33e8a6122ab2b",
+            "executable": false
+          },
+          "mbridge/models/gemma3/__init__.py": {
+            "sha256": "e2016611aebae9796bc98d8a36201674ed5377bf98cfbc00f8248b7aa5d64921",
+            "executable": false
+          },
+          "mbridge/models/gemma3/gpt_model.py": {
+            "sha256": "b81f473a402433b50f52ee8b8933c9f7e861df754332c9e08f37d51535c5ba73",
+            "executable": false
+          },
+          "mbridge/models/gemma3/model.py": {
+            "sha256": "336fb12b39c8359598a0fe3a0a561c06dda43e852e1b0e961c9d7329b90528bf",
+            "executable": false
+          },
+          "mbridge/models/gemma3/projector.py": {
+            "sha256": "a2aba414a605be029e776fda9e245e7fc0e6d9bd19c6874f4c547360b272150c",
+            "executable": false
+          },
+          "mbridge/models/gemma3/transformer_config.py": {
+            "sha256": "5fa4cc85536dad192767a8a6caa8b64d99e8484dd04973bf49cc22f55597623a",
+            "executable": false
+          },
+          "mbridge/models/gemma3/transformer_layer.py": {
+            "sha256": "ff150aa240367d6d14f2c2a6452b0671b7ed17bf202b6f9a06ce455158bd1be7",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/__init__.py": {
+            "sha256": "af91fc6b06c2ac2bc6aa9702e6ae8ebbdeebffb3937a63b59a7d3a85a7330d45",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/base_bridge.py": {
+            "sha256": "23deaa636dab0120ab4beeb6cb6c8d80df68199aca70e1d0d0acfb80336129bb",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/__init__.py": {
+            "sha256": "806cfb71ac6afdcd0457a82e2006273c293e292fc93b87756d3fd330906bfc17",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/inference_request.py": {
+            "sha256": "0a7fafce9328015bfe61fa059424c3d6b57b602e37843078337eb71742bc546a",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/model_inference_controller.py": {
+            "sha256": "e85006a4ecec26bf4a790db9c29104b9d9924384290a2b26d23712670646d137",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/model_inference_warpper.py": {
+            "sha256": "5ca94158319d5ace3e05af8153176f2507ba7071f1f2b6b2ff378aa833cecf44",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/model.py": {
+            "sha256": "d0ce5e08c70b6b17f1b8459e224a67d0bbdd4b19af9f9e40845b151c8df84a70",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/transformer_config.py": {
+            "sha256": "ff390c3b0fd0d0c6d35dc3c4cd13dd0a7c0606d6c2155f983be11968db576f72",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/transformer_layer.py": {
+            "sha256": "1fce6d7834b3cab32f16725a39d8de00fd9a53d569f074d5db0781fa3df96b23",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/vl_mixin.py": {
+            "sha256": "a2d3bcb35677a9cb562ac6703c917a80c81b27f6c7467ac44f1a13cafc6a5f73",
+            "executable": false
+          },
+          "mbridge/models/glm4moe.py": {
+            "sha256": "fe367a03d994df68ae4f0f18402f37d28da85c08dbb079d993fa35bb73eacbef",
+            "executable": false
+          },
+          "mbridge/models/internvl3/__init__.py": {
+            "sha256": "7a6ead47692d42f349fe6183ea787be5f5b0dff832113e7486128f66a9b9a569",
+            "executable": false
+          },
+          "mbridge/models/internvl3/internvl_vit_model.py": {
+            "sha256": "89c4ddbbfdd429ae6cb79609da00bdb0af1d4d78649f030c0b3095b9b4f9c24d",
+            "executable": false
+          },
+          "mbridge/models/internvl3/model.py": {
+            "sha256": "3b86357706a10d9143dae5533b15eedf0ff01850d359417cd31cdfb0e8f3bf08",
+            "executable": false
+          },
+          "mbridge/models/internvl3/transformer_config.py": {
+            "sha256": "55f1bceeb83d6ae1caea9d7f9c90395cbd84a2eacc9219a98845aa4601c7d7f6",
+            "executable": false
+          },
+          "mbridge/models/internvl3/transformer_layer.py": {
+            "sha256": "6df55fb7db06d72829ad772e1cc52705f4d748846c34b96cc744d37c2b126b5a",
+            "executable": false
+          },
+          "mbridge/models/llama.py": {
+            "sha256": "4032a65e8a9aa068bc91d4fca57bdcdc2b633d7175e2dc5da5c7f3afc673ff5b",
+            "executable": false
+          },
+          "mbridge/models/mimo.py": {
+            "sha256": "86a3e2c1af5db45e9b8f592034909c70339fd604db3f23bcefc4f19d7d877e96",
+            "executable": false
+          },
+          "mbridge/models/mixtral.py": {
+            "sha256": "81eb6220cbe6448c5bb3f3fe03cac1d873fcf80a3ec79311b332bbfa4fc0614f",
+            "executable": false
+          },
+          "mbridge/models/qwen2.py": {
+            "sha256": "af5edbb80f7d357b7d495fc1ec53a2a827ba5d7778820df137c98ee679c92f9d",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/__init__.py": {
+            "sha256": "c0423f0dbbe7a8dc033c8857cd9a311192945f55b2c43d5b526eacf9b21642fa",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/attention.py": {
+            "sha256": "35e750653b4e53e54ba16c39dab1de70dd53c9e2311bd87b74eb93aa341bc7b8",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/model.py": {
+            "sha256": "c89d945d8a0c170a86a07fb387cfca975ba788cedd6dbf4740d25965e6427070",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/rope_utils.py": {
+            "sha256": "4c816bfe3216e270b8e803ff21a51bc7cd4d3a6ea24aa286ae3241d0dfdea27d",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/transformer_config.py": {
+            "sha256": "38d772859d91f9c8228b80a759c8a77ab775c5557b500fc3af235a6268f9c960",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/vision_model.py": {
+            "sha256": "b0da2fc29228f7551bf2ff3074426dbf89ba7873bd18d684c70c0214eeecca7b",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/vision_transformer_block.py": {
+            "sha256": "24249766cdca96271e876c528b2207e9e6e3285dbae109819d0e7bb6b3b6acb6",
+            "executable": false
+          },
+          "mbridge/models/qwen2moe.py": {
+            "sha256": "3a94282e6647b0426e7601884bbf1f465da1ad31b756bab152bb936d3a578d9a",
+            "executable": false
+          },
+          "mbridge/models/qwen3.py": {
+            "sha256": "654d57fccb49848538db2c7b39b23414251935b31875ec6235bc392c7fc2efce",
+            "executable": false
+          },
+          "mbridge/models/qwen3moe.py": {
+            "sha256": "5ac1d7d2279bf83a91f6735edd0c5bd024f58fbb5be1e3ac51b6e8aace544c36",
+            "executable": false
+          },
+          "mbridge/utils/__init__.py": {
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "executable": false
+          },
+          "mbridge/utils/layer.py": {
+            "sha256": "79f737939371cc30805bab34948358af654afaaffeec6679c9738354e565782d",
+            "executable": false
+          },
+          "mbridge/utils/mappings.py": {
+            "sha256": "789af6930a432ac0dd35f26e90b4e93596f12383dc03892cdacbadda9271083e",
+            "executable": false
+          },
+          "mbridge/utils/post_creation_callbacks.py": {
+            "sha256": "b7727d1dcde74e3619621f7110e338d1b4ed303581330aa53920d51a92cc2c67",
+            "executable": false
+          },
+          "memory_estimator/MoEMemoryEstimator.pdf": {
+            "sha256": "d1fac8692fff463fe1a8edb9aa703cc389bb4e9204f529e7a7ccb59e3e4ec8db",
+            "executable": false
+          },
+          "memory_estimator/README.md": {
+            "sha256": "69fc30087191fed069d4f70f8f9a52d15d594705cec64bcfc792842f0f761682",
+            "executable": false
+          },
+          "memory_estimator/app.py": {
+            "sha256": "3b1f7b0d2d80af71d719250445ba4ece0791b1e703aefe8cc7c641a8974bbcb3",
+            "executable": false
+          },
+          "memory_estimator/estimate.py": {
+            "sha256": "89c9dcb774a3dfd5f89d5a7a6c0477a025e60f5d160540ecf7337b491d277e9e",
+            "executable": false
+          },
+          "memory_estimator/estimate_013.py": {
+            "sha256": "2292aac1104cb0f22af381f7f52ace541f62b5c2c0b21ba44551ecdfed175e04",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/__init__.py": {
+            "sha256": "3b3fe3576ee632788053c56a5535d19d7d0f19239c086a7218c02e7e7e49b247",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/base.py": {
+            "sha256": "c738c0151439a5cb9678a5c79bdefd0099dc570116cbd7e382c63d26fcc73a6c",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/gpt_model.py": {
+            "sha256": "0c5a82ed016c2b65a315ab3dc4601f8b656a41acdb6d24660a1fd58fb8d8744c",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/layers.py": {
+            "sha256": "72924c2460b3d17349b7ae1b0d44d17f38a74c9e918f03068af4cbbd21aab4b7",
+            "executable": false
+          },
+          "memory_estimator/run_webui.sh": {
+            "sha256": "f68225ec1e518cab38fd8e7c49a22784310533d642560007aa0f7a6b866b7dce",
+            "executable": false
+          },
+          "memory_estimator/webui/index.html": {
+            "sha256": "d5a111e45ea0fea0e3028be541710b144962b41514b44732c425e77810c68948",
+            "executable": false
+          },
+          "memory_estimator/webui/main.py": {
+            "sha256": "27d64e0979c3966439f23570146920e575548af13de34932597b0b6ab91782f3",
+            "executable": false
+          },
+          "memory_estimator/webui/requirements.txt": {
+            "sha256": "cd0261d538f88e115ba084d493a59873ef28e3d886aa49e9a2dc8b3f9c77757c",
+            "executable": false
+          },
+          "memory_estimator/webui/script.js": {
+            "sha256": "aae06fbc935859bffa7706ff84d74c0f4f2e1659016c6d4fce367b4647ef0419",
+            "executable": false
+          },
+          "memory_estimator/webui/style.css": {
+            "sha256": "327d41a3a93c34ada52d6cb79fd50c849b2669367296d945df94026af2269224",
+            "executable": false
+          },
+          "pyproject.toml": {
+            "sha256": "92c2d3d497177ba1a8ee67b7b564e7334d00971accdb908c783faff2eac1c400",
+            "executable": false
+          },
+          "scripts/format.sh": {
+            "sha256": "a0934a1c74265eb721a70e00c2760a7c6105bd244854d17eafe705a362c378c5",
+            "executable": false
+          },
+          "setup.py": {
+            "sha256": "5a4eae5f41594640ca78464d529a048f88a428ae9124eec6893e14ec734d117e",
+            "executable": false
+          },
+          "tests/test_deepseekv3_dequant_io.py": {
+            "sha256": "2accb0e5b1bc661a173a8e4d14e67e6a184d873c3e58d8d8fb0aeca968c8dbe7",
+            "executable": false
+          },
+          "tests/test_simple.py": {
+            "sha256": "21f48e7f12b3c835fadae9700445a4d453d4bf42037ae88f7fc8fe582f1b97e6",
+            "executable": false
+          }
+        },
+        "files": {
+          ".github/workflows/publish-to-pypi.yml": {
+            "sha256": "df873e5d91dbc8428817f9a6df650756c4da9574e2e18b8a17109a3608897fad",
+            "executable": false
+          },
+          ".github/workflows/run-tests.yml": {
+            "sha256": "93b74eef5f3c073522169284c41b8af613f1ccc2fb8ab281d2f21c0d3387e3ae",
+            "executable": false
+          },
+          ".gitignore": {
+            "sha256": "0e63ac136cf12a613c7987775d2d32f756717b3b0068a7f8153fc793a3126e54",
+            "executable": false
+          },
+          "CONTRIBUTING.md": {
+            "sha256": "b57c24c439781d63541ae9c0dfccb7462ac32193b2af1fc60ad921e47fe49a02",
+            "executable": false
+          },
+          "LICENSE": {
+            "sha256": "47d79af994c89a23f2848a1f84467c5afd8f297fc58f098b34143f96efc06b77",
+            "executable": false
+          },
+          "README.md": {
+            "sha256": "b04e1d2d1b56416d7c40fb072d459db18a10182cae56beee1d73c544ef2a9a1b",
+            "executable": false
+          },
+          "README.zh-CN.md": {
+            "sha256": "916d332119353c1bbec28ecaadf22978de6ebe6f2c90737deb04d29a8710353a",
+            "executable": false
+          },
+          "example/0.load_model_and_generate_single_gpu.py": {
+            "sha256": "9ae9d2000d0733907587f6f99f654a5ac44e180a7e57772f073466df75f83c65",
+            "executable": false
+          },
+          "example/1.load_model_and_export_single_gpu.py": {
+            "sha256": "83341a5fdde723da646d99ca2ec4a8acbe944a8a7ea8a14f7e4062b032c4a2b4",
+            "executable": false
+          },
+          "example/2.load_model_and_export_multiple_gpus.py": {
+            "sha256": "054bd6de34d9b0ddbf1f7d634ae58dae8f6cdf509daedb8b87868ec923e14907",
+            "executable": false
+          },
+          "example/3.launch_megatron_with_ray.py": {
+            "sha256": "ea9faf8e353acff7a7e9dcf019c272c1ee491f35b139f3f43c8fc452ebcd8add",
+            "executable": false
+          },
+          "example/4.launch_deepseekv3_with_ray.py": {
+            "sha256": "9c634b7f974be6462715ebca0ed07feb3b816be8e21582487c857e60317af5cd",
+            "executable": false
+          },
+          "example/gemma3/load_model_and_forward.py": {
+            "sha256": "86bbac9f2c2f1a824ac6745e1646143d9603c467a7eeb6cf45cf117378179557",
+            "executable": false
+          },
+          "example/gemma3/load_model_and_inference.py": {
+            "sha256": "33f28cb418b48cef45bdfb199beb95c30a44d8e2879d4f5b7126d248de038e0b",
+            "executable": false
+          },
+          "example/gemma3/run_test.sh": {
+            "sha256": "f01c7a4e8327355b33b416f9e282e43416dd304e3bf684ef0b364b5c2db9c52a",
+            "executable": false
+          },
+          "example/glm4v/README.md": {
+            "sha256": "92f6762cef763d557559b7909ccecf712f22c2f32f368352a0f6b7de1279da6b",
+            "executable": false
+          },
+          "example/glm4v/_test_mrope_hf_vs_megatron.py": {
+            "sha256": "5d4587cd7e172603d98a20033fe9d67a6a2f8637b6d1d503640b93635c0cea6e",
+            "executable": false
+          },
+          "example/glm4v/load_model_and_export.py": {
+            "sha256": "8b26b2df284f451df61d7ffe46093ae2200912448f39878b708dd07bc2201c38",
+            "executable": false
+          },
+          "example/glm4v/load_model_and_forward.py": {
+            "sha256": "20f4e431840d82de132a14fd44b6f52b42742c74ceb3d76e07cd5cfc31f2f119",
+            "executable": false
+          },
+          "example/glm4v/load_model_and_inference.py": {
+            "sha256": "09df467a009cd289e5580d9abcd2de4d37a868ac1a15559a144367b2677f4ba6",
+            "executable": false
+          },
+          "example/internvl3/conversation.py": {
+            "sha256": "54e014777f6eb18be2564f0a9fcc4ea9e285c21cba10119fe8560333d0a4f415",
+            "executable": false
+          },
+          "example/internvl3/data_proc.py": {
+            "sha256": "d83834881333a4f57cddc9309d19c7c50dbddf10379b0ff03843734989f28f06",
+            "executable": false
+          },
+          "example/internvl3/load_model_and_forward.py": {
+            "sha256": "9ddc93c714f1bdb6383f3379d1be31faf72b7f73b28dd4b3bf9d091879c6acfc",
+            "executable": false
+          },
+          "example/internvl3/load_model_and_inference.py": {
+            "sha256": "161c75507ebfd3af65016c69e5a6fb695aa608b3b41ec48dc4677e630f7add5a",
+            "executable": false
+          },
+          "example/internvl3/run_test.sh": {
+            "sha256": "3c7c84e7d7027bf0c0ae5e542f0ee3c4338d275b893528d14ce8df8603dbcf69",
+            "executable": false
+          },
+          "mbridge/__init__.py": {
+            "sha256": "fb3977c64129606c0c7b1dec4744d29ef7d11bd3a786b5be674a28592ee711e7",
+            "executable": false
+          },
+          "mbridge/core/__init__.py": {
+            "sha256": "b55bb45c1b06cd737310866776d166dc2be44600bc044610f5d52883b2721b7a",
+            "executable": false
+          },
+          "mbridge/core/auto_bridge.py": {
+            "sha256": "a51cd0ef5668327ad74c414bf05062912c36d729b878fc94ddcd8b418f87da19",
+            "executable": false
+          },
+          "mbridge/core/bridge.py": {
+            "sha256": "5059efca71af4b663febf91fdaffe4bd5aa2e03a35965d061f7a829d4c9334d1",
+            "executable": false
+          },
+          "mbridge/core/llm_bridge.py": {
+            "sha256": "8f84ac14f31ac6e57c63e3732cba4dfa966b279a864224adc4b4e3704e518f8d",
+            "executable": false
+          },
+          "mbridge/core/parallel_states.py": {
+            "sha256": "3327687146481b2dd641a25b87e7506e1a696c74ba46c78dcd242919469e391c",
+            "executable": false
+          },
+          "mbridge/core/safetensor_io.py": {
+            "sha256": "107af097396c9c2ee7c63031c33301218878dcd3e5b18176597202831795cdcb",
+            "executable": false
+          },
+          "mbridge/core/util.py": {
+            "sha256": "9d7e65896af56c4fa02afc0890f340897ce67cf83d25b923b5ac90e4d4d7df0b",
+            "executable": false
+          },
+          "mbridge/core/vlm_bridge.py": {
+            "sha256": "e42eaa6cad6f7825b2ca4eb2c80bf36ad220a36ef79d8f8ec91d7142fbaac506",
+            "executable": false
+          },
+          "mbridge/models/__init__.py": {
+            "sha256": "e525f812db5cb002fb980b59a23843aa3eb664bc44c336cc01d15f12c91e1737",
+            "executable": false
+          },
+          "mbridge/models/deepseek_v3.py": {
+            "sha256": "6b7dd622fbe9767401ccbf34239be6e2c9787292c0ad1d91353d09cb01b1fc86",
+            "executable": false
+          },
+          "mbridge/models/deepseek_v41.py": {
+            "sha256": "854fcb8f5e391907564c659697622b38d3658c3a9d2c6f6e6d9c0365ed72c034",
+            "executable": false
+          },
+          "mbridge/models/deepseek_v41_mapping.py": {
+            "sha256": "44b70dc66e6803097b5987fa4e0ed9d0dde2b54bbddda31e60e75de59ae11e75",
+            "executable": false
+          },
+          "mbridge/models/ext/deepseek_v3/dequant_fp8_safetensor_io.py": {
+            "sha256": "f1f5d4f471acae74220435f288debc127f48f1f870e694bf89a4b94173c8ed2b",
+            "executable": false
+          },
+          "mbridge/models/ext/deepseek_v3/kernel.py": {
+            "sha256": "52d6771a7d3688ca3afc896b69281e61888408537e37a87c8dd5a5e0dbe5774d",
+            "executable": false
+          },
+          "mbridge/models/ext/llama3_cp/cp_utils.py": {
+            "sha256": "db5ed95a03534777f96b91170c24b9cc2f5c757f1371c97be37e53e669f756d7",
+            "executable": false
+          },
+          "mbridge/models/ext/llama3_cp/llama3_cp_memory_efficient_attention.py": {
+            "sha256": "9398bb29ebdb4fcbd0e070ee7f2e222ebf98a3ac21959db77ed33e8a6122ab2b",
+            "executable": false
+          },
+          "mbridge/models/gemma3/__init__.py": {
+            "sha256": "e2016611aebae9796bc98d8a36201674ed5377bf98cfbc00f8248b7aa5d64921",
+            "executable": false
+          },
+          "mbridge/models/gemma3/gpt_model.py": {
+            "sha256": "b81f473a402433b50f52ee8b8933c9f7e861df754332c9e08f37d51535c5ba73",
+            "executable": false
+          },
+          "mbridge/models/gemma3/model.py": {
+            "sha256": "336fb12b39c8359598a0fe3a0a561c06dda43e852e1b0e961c9d7329b90528bf",
+            "executable": false
+          },
+          "mbridge/models/gemma3/projector.py": {
+            "sha256": "a2aba414a605be029e776fda9e245e7fc0e6d9bd19c6874f4c547360b272150c",
+            "executable": false
+          },
+          "mbridge/models/gemma3/transformer_config.py": {
+            "sha256": "5fa4cc85536dad192767a8a6caa8b64d99e8484dd04973bf49cc22f55597623a",
+            "executable": false
+          },
+          "mbridge/models/gemma3/transformer_layer.py": {
+            "sha256": "ff150aa240367d6d14f2c2a6452b0671b7ed17bf202b6f9a06ce455158bd1be7",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/__init__.py": {
+            "sha256": "af91fc6b06c2ac2bc6aa9702e6ae8ebbdeebffb3937a63b59a7d3a85a7330d45",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/base_bridge.py": {
+            "sha256": "23deaa636dab0120ab4beeb6cb6c8d80df68199aca70e1d0d0acfb80336129bb",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/__init__.py": {
+            "sha256": "806cfb71ac6afdcd0457a82e2006273c293e292fc93b87756d3fd330906bfc17",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/inference_request.py": {
+            "sha256": "0a7fafce9328015bfe61fa059424c3d6b57b602e37843078337eb71742bc546a",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/model_inference_controller.py": {
+            "sha256": "e85006a4ecec26bf4a790db9c29104b9d9924384290a2b26d23712670646d137",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/inference/model_inference_warpper.py": {
+            "sha256": "5ca94158319d5ace3e05af8153176f2507ba7071f1f2b6b2ff378aa833cecf44",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/model.py": {
+            "sha256": "d0ce5e08c70b6b17f1b8459e224a67d0bbdd4b19af9f9e40845b151c8df84a70",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/transformer_config.py": {
+            "sha256": "ff390c3b0fd0d0c6d35dc3c4cd13dd0a7c0606d6c2155f983be11968db576f72",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/transformer_layer.py": {
+            "sha256": "1fce6d7834b3cab32f16725a39d8de00fd9a53d569f074d5db0781fa3df96b23",
+            "executable": false
+          },
+          "mbridge/models/glm4_vl/vl_mixin.py": {
+            "sha256": "a2d3bcb35677a9cb562ac6703c917a80c81b27f6c7467ac44f1a13cafc6a5f73",
+            "executable": false
+          },
+          "mbridge/models/glm4moe.py": {
+            "sha256": "fe367a03d994df68ae4f0f18402f37d28da85c08dbb079d993fa35bb73eacbef",
+            "executable": false
+          },
+          "mbridge/models/internvl3/__init__.py": {
+            "sha256": "7a6ead47692d42f349fe6183ea787be5f5b0dff832113e7486128f66a9b9a569",
+            "executable": false
+          },
+          "mbridge/models/internvl3/internvl_vit_model.py": {
+            "sha256": "89c4ddbbfdd429ae6cb79609da00bdb0af1d4d78649f030c0b3095b9b4f9c24d",
+            "executable": false
+          },
+          "mbridge/models/internvl3/model.py": {
+            "sha256": "3b86357706a10d9143dae5533b15eedf0ff01850d359417cd31cdfb0e8f3bf08",
+            "executable": false
+          },
+          "mbridge/models/internvl3/transformer_config.py": {
+            "sha256": "55f1bceeb83d6ae1caea9d7f9c90395cbd84a2eacc9219a98845aa4601c7d7f6",
+            "executable": false
+          },
+          "mbridge/models/internvl3/transformer_layer.py": {
+            "sha256": "6df55fb7db06d72829ad772e1cc52705f4d748846c34b96cc744d37c2b126b5a",
+            "executable": false
+          },
+          "mbridge/models/llama.py": {
+            "sha256": "4032a65e8a9aa068bc91d4fca57bdcdc2b633d7175e2dc5da5c7f3afc673ff5b",
+            "executable": false
+          },
+          "mbridge/models/mimo.py": {
+            "sha256": "86a3e2c1af5db45e9b8f592034909c70339fd604db3f23bcefc4f19d7d877e96",
+            "executable": false
+          },
+          "mbridge/models/mixtral.py": {
+            "sha256": "81eb6220cbe6448c5bb3f3fe03cac1d873fcf80a3ec79311b332bbfa4fc0614f",
+            "executable": false
+          },
+          "mbridge/models/qwen2.py": {
+            "sha256": "af5edbb80f7d357b7d495fc1ec53a2a827ba5d7778820df137c98ee679c92f9d",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/__init__.py": {
+            "sha256": "c0423f0dbbe7a8dc033c8857cd9a311192945f55b2c43d5b526eacf9b21642fa",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/attention.py": {
+            "sha256": "35e750653b4e53e54ba16c39dab1de70dd53c9e2311bd87b74eb93aa341bc7b8",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/model.py": {
+            "sha256": "c89d945d8a0c170a86a07fb387cfca975ba788cedd6dbf4740d25965e6427070",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/rope_utils.py": {
+            "sha256": "4c816bfe3216e270b8e803ff21a51bc7cd4d3a6ea24aa286ae3241d0dfdea27d",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/transformer_config.py": {
+            "sha256": "38d772859d91f9c8228b80a759c8a77ab775c5557b500fc3af235a6268f9c960",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/vision_model.py": {
+            "sha256": "b0da2fc29228f7551bf2ff3074426dbf89ba7873bd18d684c70c0214eeecca7b",
+            "executable": false
+          },
+          "mbridge/models/qwen2_5_vl/vision_transformer_block.py": {
+            "sha256": "24249766cdca96271e876c528b2207e9e6e3285dbae109819d0e7bb6b3b6acb6",
+            "executable": false
+          },
+          "mbridge/models/qwen2moe.py": {
+            "sha256": "3a94282e6647b0426e7601884bbf1f465da1ad31b756bab152bb936d3a578d9a",
+            "executable": false
+          },
+          "mbridge/models/qwen3.py": {
+            "sha256": "654d57fccb49848538db2c7b39b23414251935b31875ec6235bc392c7fc2efce",
+            "executable": false
+          },
+          "mbridge/models/qwen3moe.py": {
+            "sha256": "5ac1d7d2279bf83a91f6735edd0c5bd024f58fbb5be1e3ac51b6e8aace544c36",
+            "executable": false
+          },
+          "mbridge/utils/__init__.py": {
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "executable": false
+          },
+          "mbridge/utils/layer.py": {
+            "sha256": "79f737939371cc30805bab34948358af654afaaffeec6679c9738354e565782d",
+            "executable": false
+          },
+          "mbridge/utils/mappings.py": {
+            "sha256": "789af6930a432ac0dd35f26e90b4e93596f12383dc03892cdacbadda9271083e",
+            "executable": false
+          },
+          "mbridge/utils/post_creation_callbacks.py": {
+            "sha256": "b7727d1dcde74e3619621f7110e338d1b4ed303581330aa53920d51a92cc2c67",
+            "executable": false
+          },
+          "memory_estimator/MoEMemoryEstimator.pdf": {
+            "sha256": "d1fac8692fff463fe1a8edb9aa703cc389bb4e9204f529e7a7ccb59e3e4ec8db",
+            "executable": false
+          },
+          "memory_estimator/README.md": {
+            "sha256": "69fc30087191fed069d4f70f8f9a52d15d594705cec64bcfc792842f0f761682",
+            "executable": false
+          },
+          "memory_estimator/app.py": {
+            "sha256": "3b1f7b0d2d80af71d719250445ba4ece0791b1e703aefe8cc7c641a8974bbcb3",
+            "executable": false
+          },
+          "memory_estimator/estimate.py": {
+            "sha256": "89c9dcb774a3dfd5f89d5a7a6c0477a025e60f5d160540ecf7337b491d277e9e",
+            "executable": false
+          },
+          "memory_estimator/estimate_013.py": {
+            "sha256": "2292aac1104cb0f22af381f7f52ace541f62b5c2c0b21ba44551ecdfed175e04",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/__init__.py": {
+            "sha256": "3b3fe3576ee632788053c56a5535d19d7d0f19239c086a7218c02e7e7e49b247",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/base.py": {
+            "sha256": "c738c0151439a5cb9678a5c79bdefd0099dc570116cbd7e382c63d26fcc73a6c",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/gpt_model.py": {
+            "sha256": "0c5a82ed016c2b65a315ab3dc4601f8b656a41acdb6d24660a1fd58fb8d8744c",
+            "executable": false
+          },
+          "memory_estimator/moe_mem_estimator/layers.py": {
+            "sha256": "72924c2460b3d17349b7ae1b0d44d17f38a74c9e918f03068af4cbbd21aab4b7",
+            "executable": false
+          },
+          "memory_estimator/run_webui.sh": {
+            "sha256": "f68225ec1e518cab38fd8e7c49a22784310533d642560007aa0f7a6b866b7dce",
+            "executable": false
+          },
+          "memory_estimator/webui/index.html": {
+            "sha256": "d5a111e45ea0fea0e3028be541710b144962b41514b44732c425e77810c68948",
+            "executable": false
+          },
+          "memory_estimator/webui/main.py": {
+            "sha256": "27d64e0979c3966439f23570146920e575548af13de34932597b0b6ab91782f3",
+            "executable": false
+          },
+          "memory_estimator/webui/requirements.txt": {
+            "sha256": "cd0261d538f88e115ba084d493a59873ef28e3d886aa49e9a2dc8b3f9c77757c",
+            "executable": false
+          },
+          "memory_estimator/webui/script.js": {
+            "sha256": "aae06fbc935859bffa7706ff84d74c0f4f2e1659016c6d4fce367b4647ef0419",
+            "executable": false
+          },
+          "memory_estimator/webui/style.css": {
+            "sha256": "327d41a3a93c34ada52d6cb79fd50c849b2669367296d945df94026af2269224",
+            "executable": false
+          },
+          "pyproject.toml": {
+            "sha256": "92c2d3d497177ba1a8ee67b7b564e7334d00971accdb908c783faff2eac1c400",
+            "executable": false
+          },
+          "scripts/format.sh": {
+            "sha256": "a0934a1c74265eb721a70e00c2760a7c6105bd244854d17eafe705a362c378c5",
+            "executable": false
+          },
+          "setup.py": {
+            "sha256": "5a4eae5f41594640ca78464d529a048f88a428ae9124eec6893e14ec734d117e",
+            "executable": false
+          },
+          "tests/test_deepseekv3_dequant_io.py": {
+            "sha256": "2accb0e5b1bc661a173a8e4d14e67e6a184d873c3e58d8d8fb0aeca968c8dbe7",
+            "executable": false
+          },
+          "tests/test_simple.py": {
+            "sha256": "21f48e7f12b3c835fadae9700445a4d453d4bf42037ae88f7fc8fe582f1b97e6",
+            "executable": false
+          }
+        }
+      }
+    ]
   }
 }

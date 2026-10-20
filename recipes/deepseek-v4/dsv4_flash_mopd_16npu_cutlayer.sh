@@ -105,7 +105,30 @@ export OMP_PROC_BIND="${OMP_PROC_BIND:-false}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-6}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
-export ASCEND_RT_VISIBLE_DEVICES=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+# V4 MTP training is opt-in; rollout speculative decoding stays disabled.
+MTP_ENABLE="${MTP_ENABLE:-False}"
+MTP_ENABLE_TRAIN="${MTP_ENABLE_TRAIN:-${MTP_ENABLE}}"
+MTP_LOSS_SCALING_FACTOR="${MTP_LOSS_SCALING_FACTOR:-0.1}"
+DISTILLATION_ENABLED="${DISTILLATION_ENABLED:-True}"
+USE_CUT_MODEL_OVERLAY="${USE_CUT_MODEL_OVERLAY:-True}"
+CUT_KEEP_MTP="${CUT_KEEP_MTP:-${MTP_ENABLE}}"
+for flag in MTP_ENABLE MTP_ENABLE_TRAIN DISTILLATION_ENABLED USE_CUT_MODEL_OVERLAY CUT_KEEP_MTP; do
+    case "${!flag}" in
+        True|true|False|false) ;;
+        *) echo "Invalid boolean $flag=${!flag}" >&2; exit 2 ;;
+    esac
+done
+if [[ "$MTP_ENABLE_TRAIN" == True || "$MTP_ENABLE_TRAIN" == true ]]; then
+    [[ "$MTP_ENABLE" == True || "$MTP_ENABLE" == true ]] || { echo 'MTP_ENABLE_TRAIN requires MTP_ENABLE=True' >&2; exit 2; }
+fi
+if [[ "$MTP_ENABLE" == True || "$MTP_ENABLE" == true ]]; then
+    [[ "$CUT_KEEP_MTP" == True || "$CUT_KEEP_MTP" == true ]] || { echo 'MTP_ENABLE requires CUT_KEEP_MTP=True' >&2; exit 2; }
+fi
+if [[ "$DISTILLATION_ENABLED" == True || "$DISTILLATION_ENABLED" == true ]]; then
+    export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15}"
+else
+    export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
+fi
 export VERL_MOPD_DEBUG="${VERL_MOPD_DEBUG:-1}"
 
 # ------------------------- Paths -------------------------
@@ -113,7 +136,9 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FULL_MODEL_PATH="${FULL_MODEL_PATH:-/path/to/DeepSeek-V4-Flash}"
 CUT_NUM_LAYERS=4
-CUT_MODEL_OVERLAY="${CUT_MODEL_OVERLAY:-${TMPDIR:-/tmp}/dsv4_flash_bf16_4layers_model}"
+CUT_MTP_SUFFIX=""
+if [[ "$CUT_KEEP_MTP" == True || "$CUT_KEEP_MTP" == true ]]; then CUT_MTP_SUFFIX="_mtp"; fi
+CUT_MODEL_OVERLAY="${CUT_MODEL_OVERLAY:-${TMPDIR:-/tmp}/dsv4_flash_bf16_4layers_model${CUT_MTP_SUFFIX}}"
 FORCE_REBUILD_CUT_MODEL_OVERLAY="${FORCE_REBUILD_CUT_MODEL_OVERLAY:-False}"
 
 TRANSFER_QUEUE_VERSION="$(
@@ -133,11 +158,18 @@ PREPARE_CUT_MODEL_ARGS=(
     --output-path "${CUT_MODEL_OVERLAY}"
     --num-layers 4
 )
+if [[ "$CUT_KEEP_MTP" == True || "$CUT_KEEP_MTP" == true ]]; then
+    PREPARE_CUT_MODEL_ARGS+=(--keep-mtp)
+fi
 if [[ "${FORCE_REBUILD_CUT_MODEL_OVERLAY}" == "True" || "${FORCE_REBUILD_CUT_MODEL_OVERLAY}" == "true" ]]; then
     PREPARE_CUT_MODEL_ARGS+=(--force)
 fi
-"${PREPARE_CUT_MODEL_ARGS[@]}"
-MODEL_PATH="${CUT_MODEL_OVERLAY}"
+if [[ "$USE_CUT_MODEL_OVERLAY" == True || "$USE_CUT_MODEL_OVERLAY" == true ]]; then
+    "${PREPARE_CUT_MODEL_ARGS[@]}"
+    MODEL_PATH="${CUT_MODEL_OVERLAY}"
+else
+    MODEL_PATH="${MODEL_PATH:-${CUT_MODEL_OVERLAY}}"
+fi
 
 STUDENT_MODEL="${MODEL_PATH}"
 TEACHER_MODEL="${MODEL_PATH}"
@@ -167,6 +199,7 @@ vocab_size = first_int("vocab_size", default=129280)
 padded_vocab_size = first_int("padded_vocab_size", default=vocab_size)
 
 values = {
+    "DSV4_MTP_LAYERS": first_int("num_nextn_predict_layers", "mtp_num_layers", default=0),
     "DSV4_HIDDEN_SIZE": hidden_size,
     "DSV4_FFN_HIDDEN_SIZE": ffn_hidden_size,
     "DSV4_MOE_FFN_HIDDEN_SIZE": moe_ffn_hidden_size,
@@ -178,6 +211,10 @@ for key, value in values.items():
     print(f"{key}={shlex.quote(str(value))}")
 PY
 )"
+
+if [[ "$MTP_ENABLE" == True || "$MTP_ENABLE" == true ]]; then
+    (( DSV4_MTP_LAYERS > 0 )) || { echo 'Selected model has no MTP weights; rebuild with CUT_KEEP_MTP=True' >&2; exit 2; }
+fi
 
 TRAIN_FILES="${TRAIN_FILES:-/path/to/k26_rl_train.parquet}"
 VAL_FILES="${VAL_FILES:-/path/to/k26_rl_valid.parquet}"
@@ -268,8 +305,10 @@ MODEL_CONFIG=(
     actor_rollout_ref.model.trust_remote_code=True
     "actor_rollout_ref.model.custom_chat_template='${CHAT_TEMPLATE}'"
     actor_rollout_ref.model.use_remove_padding=False
-    actor_rollout_ref.model.mtp.enable_train=False
-    actor_rollout_ref.model.mtp.enable=False
+    actor_rollout_ref.model.mtp.enable_train="${MTP_ENABLE_TRAIN}"
+    actor_rollout_ref.model.mtp.enable="${MTP_ENABLE}"
+    actor_rollout_ref.model.mtp.enable_rollout=False
+    actor_rollout_ref.model.mtp.mtp_loss_scaling_factor="${MTP_LOSS_SCALING_FACTOR}"
     actor_rollout_ref.actor.mindspeed.use_remove_padding=False
 )
 
@@ -360,8 +399,6 @@ ACTOR_CONFIG=(
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.fix_router=False
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.moe_router_dtype=fp32
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.n_hash_layers=3
-    +actor_rollout_ref.actor.mindspeed.llm_kwargs.mtp_num_layers=0
-    +actor_rollout_ref.actor.mindspeed.llm_kwargs.mtp_loss_scaling_factor=0.3
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.mtp_mem_efficient_logits=True
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.recompute_granularity=full
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.recompute_method=uniform
@@ -489,7 +526,7 @@ ROLLOUT_CONFIG=(
 )
 
 TEACHER_CONFIG=(
-    distillation.enabled=True
+    distillation.enabled="${DISTILLATION_ENABLED}"
     distillation.share_gpu_group=False
     distillation.n_gpus_per_node=8
     distillation.nnodes=1

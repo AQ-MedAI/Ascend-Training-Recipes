@@ -1,6 +1,6 @@
 # mbridge adaptation
 
-V4 and V4.1 use upstream [ISEEKYAN/mbridge](https://github.com/ISEEKYAN/mbridge), tag `v0.15.1`, commit `0cd4ae23f2425da77a80cb3f517828452fa8e984`, followed by `ascend-training.patch`.
+V4 and V4.1 use upstream [ISEEKYAN/mbridge](https://github.com/ISEEKYAN/mbridge), tag `v0.15.1`, commit `0cd4ae23f2425da77a80cb3f517828452fa8e984`, followed by `ascend-training.patch` and `v4-mtp.patch`.
 
 The patch changes eight files for DeepSeek weight loading/export, mappings and safetensors handling. The base and final inventories and patch checksum are recorded in [mbridge-sources.json](../../dependencies/mbridge-sources.json).
 
@@ -19,3 +19,5 @@ python tools/prepare_framework_sources.py --root /path/to/sources --manifest dep
 ```
 
 K2.6 currently selects NVIDIA Megatron-Bridge (`vanilla_mbridge=False`), not this package. This conversion does not change or validate the K2.6 environment.
+
+`v4-mtp.patch` adds V4 MTP namespace mappings and reversible e_proj/h_proj conversion. It follows `ascend-training.patch`; shared embedding/head export retains V4 names.

@@ -117,7 +117,7 @@ export SEED=42
 (( ROLLOUT_TP * ROLLOUT_DP == 128 ))
 (( ROLLOUT_EP == 128 ))
 
-exec bash "${SCRIPT_DIR}/dsv4_flash_verl.sh" \
+exec bash "${SCRIPT_DIR}/dsv4_flash_rl.sh" \
     actor_rollout_ref.actor.use_kl_loss=False \
     actor_rollout_ref.actor.kl_loss_coef=0.0 \
     +actor_rollout_ref.actor.checkpoint.mbridge_config.memory_efficient=False \

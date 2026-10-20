@@ -1,0 +1,74 @@
+diff --git a/verl/utils/megatron_utils.py b/verl/utils/megatron_utils.py
+index 3ad07e9e..638c85ef 100644
+--- a/verl/utils/megatron_utils.py
++++ b/verl/utils/megatron_utils.py
+@@ -1544,6 +1544,14 @@ def patch_engine_mtp(module, model_config):
+ 
+     modules = module if isinstance(module, list) else [module]
+     for m in modules:
++        # MindSpeed V4 computes MTP loss in forward and must return PPO logits.
++        actual = unwrap_model(m)
++        if actual.__class__.__name__ == "DeepSeek4Model":
++            actual.verl_return_logits = True
++            if hasattr(actual, "mtp"):
++                actual.mtp.verl_mtp = True
++                actual.mtp.detach_encoder = model_config.mtp.detach_encoder
++            continue
+         patch_postprocess(m)
+         if model_config.mtp.detach_encoder:
+             patch_mtp_layer_get_embeddings(m)
+diff --git a/verl/workers/engine/mindspeed/utils.py b/verl/workers/engine/mindspeed/utils.py
+index 0aa64279..f235e540 100644
+--- a/verl/workers/engine/mindspeed/utils.py
++++ b/verl/workers/engine/mindspeed/utils.py
+@@ -181,9 +181,9 @@ def apply_patch(model_config, engine_config, optimizer_config):
+     # model_config = get_base_mcore_config_from_model_config(model_config)
+     # optimizer_config = get_base_mcore_config_from_optim_config(optimizer_config)
+     is_v41 = 'DeepseekV41ForCausalLM' in model_config.architectures
+-    engine_config = get_base_mcore_config_from_engine_config(engine_config)
++    engine_args = get_base_mcore_config_from_engine_config(engine_config)
+     #all_config = {**model_config, **optimizer_config, **engine_config}
+-    all_config = {**engine_config}
++    all_config = {**engine_args}
+     if is_v41:
+         # Geometry comes from the actual V4.1 checkpoint, never a V4 launcher's
+         # num_layers/hidden_size/spec. Optimizer values follow the existing factory.
+@@ -210,11 +210,37 @@ def apply_patch(model_config, engine_config, optimizer_config):
+             use_global_aux_loss=False, moe_router_load_balancing_type='none',
+             moe_router_enable_expert_bias=False, moe_router_dtype='fp32',
+             moe_alltoall_overlap_comm=False, moe_allgather_overlap_comm=False,
+-            sequence_parallel=engine_config['tensor_model_parallel_size'] > 1,
++            sequence_parallel=engine_args['tensor_model_parallel_size'] > 1,
+             add_bias_linear=False, disable_bias_linear=True, untie_embeddings_and_output_weights=True,
+             bf16=True, use_mcore_models=True,
+             tokenizer_type='PretrainedFromHF', tokenizer_name_or_path=model_config.tokenizer_path,
+         )
++    if getattr(model_config.hf_config, "model_type", None) == "deepseek_v4":
++        enabled = model_config.mtp.enable
++        train = model_config.mtp.enable_train
++        count = getattr(model_config.hf_config, "num_nextn_predict_layers", 0)
++        if train and not enabled:
++            raise ValueError("MTP enable_train=True requires mtp.enable=True")
++        if enabled and not count:
++            raise ValueError("The V4 checkpoint contains no MTP layers")
++        if enabled and (engine_config.use_remove_padding or engine_config.dynamic_context_parallel):
++            raise ValueError("V4 MTP currently requires use_remove_padding=False and static CP")
++        if enabled and not all_config.get("enable_mhc", False):
++            raise ValueError("V4 MTP requires enable_mhc=True")
++        if enabled and all_config.get("schedules_method") == "dualpipev":
++            raise ValueError("V4 MTP in verl currently uses the standard pipeline schedule")
++        if enabled and all_config.get("moe_fb_overlap", False):
++            raise ValueError("V4 MTP requires moe_fb_overlap=False")
++        all_config["mtp_num_layers"] = count if enabled else 0
++        all_config["mtp_loss_scaling_factor"] = model_config.mtp.mtp_loss_scaling_factor
++        if enabled:
++            ratios = list(all_config["compress_ratios"])
++            expected = all_config["num_layers"] + count
++            hf_ratios = getattr(model_config.hf_config, "compress_ratios", None)
++            if len(ratios) < expected:
++                ratios.extend(hf_ratios[len(ratios):expected] if hf_ratios is not None
++                              and len(hf_ratios) >= expected else [0] * (expected - len(ratios)))
++            all_config["compress_ratios"] = ratios
+     mcore_config = add_mcore_arguments(all_config)
+     from mindspeed_llm.tasks.megatron_adaptor_v2 import repatch
+ 

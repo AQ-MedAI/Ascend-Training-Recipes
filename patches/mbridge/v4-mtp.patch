@@ -1,0 +1,66 @@
+diff --git a/mbridge/models/deepseek_v3.py b/mbridge/models/deepseek_v3.py
+index 2189cf14..ed270ff9 100644
+--- a/mbridge/models/deepseek_v3.py
++++ b/mbridge/models/deepseek_v3.py
+@@ -343,9 +343,14 @@ class DeepseekV3Bridge(LLMBridge):
+         self, mcore_weights_name: str, mcore_weights: torch.Tensor
+     ) -> tuple[list[str], list[torch.Tensor]]:
+ 
++        if self.hf_config.model_type == "deepseek_v4" and mcore_weights_name.endswith(".eh_proj.weight"):
++            names = self._weight_name_mapping_mcore_to_hf(mcore_weights_name)
++            return names, [weight.contiguous() for weight in mcore_weights.chunk(2, dim=1)]
++
+         # note: only support one mtp layer for now
+         if (
+-            self.config.mtp_num_layers == 1
++            self.hf_config.model_type != "deepseek_v4"
++            and self.config.mtp_num_layers == 1
+             and self.config.num_layers == 61
+             and mcore_weights_name in self._SHARED_STATE_DICT_MAPPING
+         ):
+@@ -353,6 +358,13 @@ class DeepseekV3Bridge(LLMBridge):
+             return hf_names, [mcore_weights] * len(hf_names)
+         return super()._weight_to_hf_format(mcore_weights_name, mcore_weights)
+ 
++    def _weight_to_mcore_format(self, name, hf_weights):
++        if self.hf_config.model_type == "deepseek_v4" and name.endswith(".eh_proj.weight"):
++            if len(hf_weights) != 2 or hf_weights[0].shape != hf_weights[1].shape:
++                raise ValueError("V4 MTP requires matching e_proj and h_proj weights")
++            return torch.cat(hf_weights, dim=1)
++        return super()._weight_to_mcore_format(name, hf_weights)
++
+     def _get_safetensor_io(self, weights_path: str):
+         if self.dtype == torch.bfloat16:
+             from .ext.deepseek_v3.dequant_fp8_safetensor_io import (
+@@ -386,6 +398,31 @@ class DeepseekV3Bridge(LLMBridge):
+         return convert_names
+ 
+     def _convert_mtp_param(self, name: str) -> tuple[list[str]]:
++        if self.hf_config.model_type == "deepseek_v4":
++            match = re.fullmatch(r"mtp\.final_layernorms\.(\d+)\.weight", name)
++            if match and int(match[1]) < self.config.mtp_num_layers:
++                return [f"mtp.{match[1]}.norm.weight"]
++            match = re.fullmatch(r"mtp\.layers\.(\d+)\.(.+)", name)
++            if not match or int(match[1]) >= self.config.mtp_num_layers:
++                raise ValueError(f"Invalid V4 MTP parameter: {name}")
++            index, suffix = match.groups()
++            direct = {
++                "enorm.weight": ["enorm.weight"],
++                "hnorm.weight": ["hnorm.weight"],
++                "eh_proj.weight": ["e_proj.weight", "h_proj.weight"],
++                "final_layernorm.weight": ["norm.weight"],
++                "hc_head.hc_base": ["hc_head_base"],
++                "hc_head.hc_fn.weight": ["hc_head_fn"],
++                "hc_head.hc_scale": ["hc_head_scale"],
++            }
++            if suffix in direct:
++                return [f"mtp.{index}.{part}" for part in direct[suffix]]
++            if not suffix.startswith("transformer_layer."):
++                raise NotImplementedError(f"Unsupported V4 MTP parameter: {name}")
++            proxy = "decoder.layers.0." + suffix.removeprefix("transformer_layer.")
++            names = (self._weight_name_mapping_mlp(proxy) if "mlp" in proxy
++                     else self._weight_name_mapping_attention(proxy))
++            return [value.replace("layers.0.", f"mtp.{index}.", 1) for value in names]
+         assert self.config.mtp_num_layers == 1, "only support one mtp layer for now"
+         assert self.config.num_layers == 61, "only support 61 layers for now"
+         direct_name_mapping = {

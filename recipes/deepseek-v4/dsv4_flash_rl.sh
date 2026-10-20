@@ -158,12 +158,28 @@ DATA_CONFIG=(
     data.truncation=left
 )
 
+# V4 MTP training is opt-in; rollout speculative decoding stays disabled.
+MTP_ENABLE="${MTP_ENABLE:-False}"
+MTP_ENABLE_TRAIN="${MTP_ENABLE_TRAIN:-${MTP_ENABLE}}"
+MTP_LOSS_SCALING_FACTOR="${MTP_LOSS_SCALING_FACTOR:-0.1}"
+for flag in MTP_ENABLE MTP_ENABLE_TRAIN; do
+    case "${!flag}" in
+        True|true|False|false) ;;
+        *) echo "Invalid boolean $flag=${!flag}" >&2; exit 2 ;;
+    esac
+done
+if [[ "$MTP_ENABLE_TRAIN" == True || "$MTP_ENABLE_TRAIN" == true ]]; then
+    [[ "$MTP_ENABLE" == True || "$MTP_ENABLE" == true ]] || { echo 'MTP_ENABLE_TRAIN requires MTP_ENABLE=True' >&2; exit 2; }
+fi
+
 MODEL_CONFIG=(
     actor_rollout_ref.model.path="${MODEL_PATH}"
     actor_rollout_ref.model.trust_remote_code=True
     actor_rollout_ref.model.use_remove_padding=False
-    actor_rollout_ref.model.mtp.enable_train=False
-    actor_rollout_ref.model.mtp.enable=False
+    actor_rollout_ref.model.mtp.enable_train="${MTP_ENABLE_TRAIN}"
+    actor_rollout_ref.model.mtp.enable="${MTP_ENABLE}"
+    actor_rollout_ref.model.mtp.enable_rollout=False
+    actor_rollout_ref.model.mtp.mtp_loss_scaling_factor="${MTP_LOSS_SCALING_FACTOR}"
     actor_rollout_ref.actor.mindspeed.use_remove_padding=False
 )
 
@@ -248,8 +264,6 @@ ACTOR_CONFIG=(
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.fix_router=False
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.moe_router_dtype=fp32
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.n_hash_layers=3
-    +actor_rollout_ref.actor.mindspeed.llm_kwargs.mtp_num_layers=0
-    +actor_rollout_ref.actor.mindspeed.llm_kwargs.mtp_loss_scaling_factor=0.3
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.mtp_mem_efficient_logits=True
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.recompute_granularity=full
     +actor_rollout_ref.actor.mindspeed.llm_kwargs.recompute_method=uniform

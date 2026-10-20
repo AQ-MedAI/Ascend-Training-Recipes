@@ -15,4 +15,6 @@ Upstream nested submodule pins are preserved and verified, but nested repositori
 
 When updating a patch, regenerate its SHA-256 and final source inventory, then verify both profiles and their round-trip switching. Keep patch files out of automatic formatters.
 
-Both V4 and V4.1 apply `common.patch` followed by `v41.patch` and select identical final sources. Existing V4-only managed checkouts are recognized for safe upgrade; additional edits are preserved by refusing to proceed.
+Both V4 and V4.1 apply `common.patch`, `v41.patch` and `v4-mtp.patch` and select identical final sources. Existing V4-only managed checkouts are recognized for safe upgrade; additional edits are preserved by refusing to proceed.
+
+`v4-mtp.patch` follows the shared patches and implements V4 MTP training with uncollapsed mHC streams, pipeline layer offsets, mirrored-CP token shifts and auxiliary-loss backpropagation. The V4.1 native model is unchanged.

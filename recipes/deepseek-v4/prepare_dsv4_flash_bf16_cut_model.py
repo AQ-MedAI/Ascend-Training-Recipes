@@ -8,7 +8,8 @@ cut-layer BF16 HF checkpoint before launching verl/vLLM.
 
 It intentionally converts only the tensors needed by the reduced model:
 embeddings, lm head/final norms, and layers [0, num_layers).  Scale tensors and
-MTP/full higher-layer tensors are omitted from the output index.
+Higher-layer tensors are omitted. MTP is omitted by default; --keep-mtp
+retains the official mtp.<index> weights and their per-layer configuration.
 """
 
 from __future__ import annotations
@@ -94,11 +95,11 @@ def parse_layer_id(name: str) -> int | None:
     return None
 
 
-def should_keep_tensor(name: str, num_layers: int) -> bool:
+def should_keep_tensor(name: str, num_layers: int, keep_mtp: bool = False) -> bool:
     if name.endswith(".scale") or name.endswith("_scale_inv"):
         return False
     if name.startswith("mtp.") or name.startswith("model.mtp."):
-        return False
+        return keep_mtp
     layer_id = parse_layer_id(name)
     if layer_id is not None:
         return layer_id < num_layers
@@ -118,7 +119,7 @@ def scale_name_for(weight_name: str, weight_map: dict[str, str]) -> str | None:
 
 def copy_sidecar_files(src: Path, dst: Path) -> None:
     for item in src.iterdir():
-        if item.name in {"config.json", "model.safetensors.index.json"}:
+        if item.name in {"config.json", "model.safetensors.index.json", ".verl_bf16_cut_manifest.json"}:
             continue
         if item.suffix == ".safetensors":
             continue
@@ -128,7 +129,7 @@ def copy_sidecar_files(src: Path, dst: Path) -> None:
         target.symlink_to(item, target_is_directory=item.is_dir())
 
 
-def is_complete_output(dst: Path, src: Path, num_layers: int) -> bool:
+def is_complete_output(dst: Path, src: Path, num_layers: int, keep_mtp: bool = False) -> bool:
     marker_path = dst / ".verl_bf16_cut_manifest.json"
     config_path = dst / "config.json"
     index_path = dst / "model.safetensors.index.json"
@@ -149,6 +150,15 @@ def is_complete_output(dst: Path, src: Path, num_layers: int) -> bool:
             return False
         if int(marker["num_layers"]) != num_layers:
             return False
+        if marker.get("keep_mtp", False) != keep_mtp:
+            return False
+        mtp_layers = int(config.get("num_nextn_predict_layers", 0))
+        if keep_mtp:
+            if mtp_layers <= 0 or marker.get("num_mtp_layers") != mtp_layers:
+                return False
+            validate_mtp_weights(config, weight_map)
+        elif mtp_layers or any(name.startswith(("mtp.", "model.mtp.")) for name in weight_map):
+            return False
         if int(marker["num_tensors"]) != len(weight_map):
             return False
         if config.get("_verl_cut_num_layers") != num_layers:
@@ -166,13 +176,13 @@ def is_complete_output(dst: Path, src: Path, num_layers: int) -> bool:
         return False
 
 
-def prepare_output_dir(dst: Path, src: Path, num_layers: int, force: bool) -> bool:
+def prepare_output_dir(dst: Path, src: Path, num_layers: int, force: bool, keep_mtp: bool = False) -> bool:
     if not dst.exists():
         dst.mkdir(parents=True)
         return True
     marker = dst / ".verl_bf16_cut_manifest.json"
     safe_default_overlay = dst.name.startswith("dsv4_flash_bf16_")
-    if marker.exists() and not force and is_complete_output(dst, src, num_layers):
+    if marker.exists() and not force and is_complete_output(dst, src, num_layers, keep_mtp=keep_mtp):
         return False
     if marker.exists() or (force and safe_default_overlay):
         shutil.rmtree(dst)
@@ -184,16 +194,48 @@ def prepare_output_dir(dst: Path, src: Path, num_layers: int, force: bool) -> bo
     )
 
 
-def adjust_cut_config(config: dict, num_layers: int) -> None:
+def validate_mtp_weights(config: dict, weight_map: dict) -> int:
+    count = int(config.get("num_nextn_predict_layers", config.get("mtp_num_layers", 0)) or 0)
+    if count <= 0:
+        raise ValueError("--keep-mtp requires a source checkpoint with MTP layers")
+    required = (
+        "e_proj.weight",
+        "h_proj.weight",
+        "enorm.weight",
+        "hnorm.weight",
+        "norm.weight",
+        "hc_head_fn",
+        "hc_head_base",
+        "hc_head_scale",
+    )
+    for index in range(count):
+        prefix = f"mtp.{index}."
+        missing = [prefix + suffix for suffix in required if prefix + suffix not in weight_map]
+        for module in ("attn.", "ffn."):
+            if not any(name.startswith(prefix + module) for name in weight_map):
+                missing.append(prefix + module + "*")
+        if missing:
+            raise ValueError(f"Source checkpoint has incomplete V4 MTP weights: {missing}")
+    return count
+
+
+def adjust_cut_config(config: dict, num_layers: int, keep_mtp: bool = False) -> None:
     original_num_layers = config.get("num_hidden_layers")
+    source_mtp_layers = int(config.get("num_nextn_predict_layers", config.get("mtp_num_layers", 0)) or 0)
     config["num_hidden_layers"] = num_layers
     config["num_layers"] = num_layers
-    config["num_nextn_predict_layers"] = 0
-    config["mtp_num_layers"] = 0
+    config["num_nextn_predict_layers"] = source_mtp_layers if keep_mtp else 0
+    config["mtp_num_layers"] = source_mtp_layers if keep_mtp else 0
 
+    # MTP keeps its own layer settings after the shortened backbone. For example,
+    # [backbone x 43, mtp x 1] becomes [backbone x 4, same mtp x 1].
     for key, value in list(config.items()):
-        if isinstance(value, list) and isinstance(original_num_layers, int) and len(value) == original_num_layers:
+        if not isinstance(value, list) or not isinstance(original_num_layers, int):
+            continue
+        if len(value) == original_num_layers:
             config[key] = value[:num_layers]
+        elif source_mtp_layers and len(value) == original_num_layers + source_mtp_layers:
+            config[key] = value[:num_layers] + (value[original_num_layers:] if keep_mtp else [])
 
     for key in ("num_hash_layers", "n_hash_layers"):
         if isinstance(config.get(key), int):
@@ -203,9 +245,10 @@ def adjust_cut_config(config: dict, num_layers: int) -> None:
     config["_verl_cut_num_layers"] = num_layers
     config["_verl_cut_source"] = str(config.get("_verl_cut_source", ""))
     config["_verl_auto_dequant_bf16"] = True
+    config["_verl_cut_keep_mtp"] = keep_mtp
 
 
-def materialize_bf16_cut(src: Path, dst: Path, num_layers: int, force: bool) -> None:
+def materialize_bf16_cut(src: Path, dst: Path, num_layers: int, force: bool, keep_mtp: bool = False) -> None:
     src = src.resolve()
     dst = dst.resolve()
     if src == dst:
@@ -220,15 +263,19 @@ def materialize_bf16_cut(src: Path, dst: Path, num_layers: int, force: bool) -> 
     if not index_path.exists():
         raise FileNotFoundError(f"model.safetensors.index.json not found: {index_path}")
 
-    if not prepare_output_dir(dst, src=src, num_layers=num_layers, force=force):
-        print(f"Reusing complete BF16 cut model: {dst}")
-        return
-
     config = load_json(config_path)
     index = load_json(index_path)
     weight_map: dict[str, str] = index["weight_map"]
+    source_layers = int(config["num_hidden_layers"])
+    if not 0 < num_layers <= source_layers:
+        raise ValueError(f"num_layers must be in [1, {source_layers}], got {num_layers}")
+    mtp_layers = validate_mtp_weights(config, weight_map) if keep_mtp else 0
 
-    keep_names = [name for name in weight_map if should_keep_tensor(name, num_layers)]
+    if not prepare_output_dir(dst, src=src, num_layers=num_layers, force=force, keep_mtp=keep_mtp):
+        print(f"Reusing complete BF16 cut model: {dst} (keep_mtp={keep_mtp})")
+        return
+
+    keep_names = [name for name in weight_map if should_keep_tensor(name, num_layers, keep_mtp=keep_mtp)]
     file_to_names: dict[str, list[str]] = defaultdict(list)
     for name in keep_names:
         file_to_names[weight_map[name]].append(name)
@@ -242,6 +289,7 @@ def materialize_bf16_cut(src: Path, dst: Path, num_layers: int, force: bool) -> 
         return loaded_files[filename][name]
 
     new_weight_map: dict[str, str] = {}
+    original_dtype = torch.get_default_dtype()
     torch.set_default_dtype(torch.bfloat16)
     try:
         for filename in sorted(file_to_names):
@@ -269,11 +317,11 @@ def materialize_bf16_cut(src: Path, dst: Path, num_layers: int, force: bool) -> 
                 for old_filename in list(loaded_files)[:-2]:
                     loaded_files.pop(old_filename, None)
     finally:
-        torch.set_default_dtype(torch.float32)
+        torch.set_default_dtype(original_dtype)
 
     copy_sidecar_files(src, dst)
 
-    adjust_cut_config(config, num_layers)
+    adjust_cut_config(config, num_layers, keep_mtp=keep_mtp)
     config["_verl_cut_num_layers"] = num_layers
     config["_verl_cut_source"] = str(src)
 
@@ -285,6 +333,8 @@ def materialize_bf16_cut(src: Path, dst: Path, num_layers: int, force: bool) -> 
             "source": str(src),
             "num_layers": num_layers,
             "num_tensors": len(new_weight_map),
+            "keep_mtp": keep_mtp,
+            "num_mtp_layers": mtp_layers,
         },
     )
 
@@ -295,6 +345,7 @@ def main() -> None:
     parser.add_argument("--output-path", required=True)
     parser.add_argument("--num-layers", type=int, required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--keep-mtp", action="store_true", help="Retain official V4 MTP weights for training tests")
     args = parser.parse_args()
 
     materialize_bf16_cut(
@@ -302,6 +353,7 @@ def main() -> None:
         dst=Path(args.output_path),
         num_layers=args.num_layers,
         force=args.force,
+        keep_mtp=args.keep_mtp,
     )
     print(Path(args.output_path).resolve())
 
