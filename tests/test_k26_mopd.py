@@ -66,6 +66,7 @@ class MopdLauncherTest(unittest.TestCase):
             ):
                 shutil.copy2(RECIPE / name, recipe / name)
             (recipe / "runtime_env.sh").write_text(
+                "export MINDSPEED_ROOT=/stub/mindspeed\n"
                 "export MEGATRON_ROOT=/stub/core\nexport MEGATRON_BRIDGE_ROOT=/stub/bridge\n"
             )
             runner = root / "python-runner"

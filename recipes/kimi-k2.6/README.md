@@ -20,6 +20,19 @@ reward, log and shared-cache paths before use; some profiles still set paths dir
 
 Run `bash tools/setup_sources.sh k26` to prepare the pinned upstream verl and its K26 patches. This selects only verl; provide a compatible K26 runtime and its other dependencies on every node.
 The RL entry defaults to `third_party/verl`; override `VERL_ROOT` when needed.
+Both RL and MOPD default to `third_party/MindSpeed`. Set `MINDSPEED_ROOT` to
+an existing, K26-adapted MindSpeed checkout when using another location:
+
+```bash
+export MINDSPEED_ROOT=/workspace-verl/Ascend-Training-Recipes/third_party/MindSpeed
+```
+
+`runtime_env.sh` puts this checkout first in `PYTHONPATH`, validates the selected
+package before importing its adapter, and prints its resolved path. The launchers
+propagate `MINDSPEED_ROOT` and `PYTHONPATH` to Ray workers. Use the same prepared
+source paths on all nodes and restart the training processes after changing them.
+This selects sources; it does not apply patches.
+
 `vanilla_mbridge=False` selects Megatron-Bridge, not AQ mbridge. Do not assume that the
 V4/V4.1 MindSpeed, Megatron or native operator combination is compatible with K26.
 

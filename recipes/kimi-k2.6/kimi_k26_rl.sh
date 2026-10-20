@@ -333,6 +333,7 @@ EXTRA=(
 source "${K26_SCRIPT_DIR}/runtime_env.sh"
 EXTRA+=(
     "++ray_kwargs.ray_init.runtime_env.env_vars.PYTHONPATH='${PYTHONPATH}'"
+    "++ray_kwargs.ray_init.runtime_env.env_vars.MINDSPEED_ROOT='${MINDSPEED_ROOT}'"
     "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_ROOT='${MEGATRON_ROOT}'"
     "++ray_kwargs.ray_init.runtime_env.env_vars.MEGATRON_BRIDGE_ROOT='${MEGATRON_BRIDGE_ROOT}'"
     "++ray_kwargs.ray_init.runtime_env.env_vars.TRANSFORMERS_VERBOSITY='${TRANSFORMERS_VERBOSITY}'"
