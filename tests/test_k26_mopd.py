@@ -42,7 +42,11 @@ class MopdRewardTest(unittest.TestCase):
             for source, solution, expected in cases:
                 with self.subTest(source=source, solution=solution):
                     result = reward.compute_score(source, solution, "42", extra_info={}, router_option=None)
-                    self.assertEqual(result["score"] if isinstance(result, dict) else result, expected)
+                    self.assertEqual(list(result), ["score", "acc", "pred"])
+                    self.assertEqual(result["score"], expected)
+                    self.assertEqual(result["acc"], expected == 1.0)
+                    self.assertEqual(result["pred"], None if solution == "No final answer"
+                                     else "42" if expected == 1.0 else "41")
             result = reward.compute_score(
                 "DigitalLearningGmbH/MATH-lighteval", "Answer: 42", "42", math_strict_box_verify=False
             )
