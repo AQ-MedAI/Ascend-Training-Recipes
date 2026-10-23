@@ -30,3 +30,42 @@ native MessagePack values, validates its dtype, shape and byte count, and retain
 compatibility with direct Tensor results. It does not enable pickle serialization.
 Run `bash tools/setup_sources.sh k26` to update a prepared K26 tree, then restart
 the training driver and teacher workers.
+
+### DAPO group filtering
+
+`group-filter.patch` (V4/V4.1) and `group-filter-k26.patch` (K2.6) enable group
+filtering in the ordinary `main_ppo` trainer. They follow the semantics in
+[upstream verl v0.6.1 DAPO](https://github.com/verl-project/verl/blob/v0.6.1/recipe/dapo/dapo_ray_trainer.py):
+retain nonconstant reward groups and singletons, replenish until
+`data.train_batch_size` prompts are available, and fail at the generation limit.
+The feature is disabled by default. After `bash tools/setup_sources.sh <profile>`,
+append these arguments to the Python training command:
+
+```bash
+algorithm.filter_groups.enable=True \
+algorithm.filter_groups.metric=seq_reward \
+algorithm.filter_groups.max_num_gen_batches=10
+```
+
+`seq_reward` uses the sum of token scores; `seq_final_reward` uses rewards after
+the configured KL penalty. Other names (e.g. `acc`) select scalar reward extra
+info. `max_num_gen_batches <= 0` means no generation-batch limit. For group-relative
+RL, set `actor_rollout_ref.rollout.n > 1`; singletons are retained as in upstream.
+
+Filtering precedes advantage calculation and optimizer updates. Before replenishment, the existing checkpoint manager restores
+the same actor weights because hybrid rollout sleep may discard them at level 2.
+This is a weight restore, not an optimizer update. Its cost is reported as
+`timing_s/filter_groups/resume_rollout`. Existing teacher
+and log-probability computation is retained so KL-based metrics remain correct.
+Entire groups are kept even after token balancing. Timings accumulate across
+replenishment batches. An incomplete batch at end of data raises an error instead
+of silently updating on fewer prompts. Retained responses consume driver memory
+while waiting for replenishment; bound the attempts for low-diversity datasets.
+Filtering changes the training distribution; it is not enabled automatically for
+RL, OPD or MOPD recipes. Metrics use the `filter_groups/` prefix.
+
+`v4-0731-backbone.patch` follows the V4/V4.1 stack. It selects the official 0731
+backbone for RL/MOPD, disables DSpark heads, preserves legacy V4 MTP behavior,
+and passes the normalized head/ratio settings to vLLM via HF overrides. Source
+checkpoints are unchanged; exported backbone-only configs do not advertise
+missing DSpark parameters. K2.6 is unaffected.

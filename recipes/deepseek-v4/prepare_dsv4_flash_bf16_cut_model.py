@@ -152,6 +152,11 @@ def is_complete_output(dst: Path, src: Path, num_layers: int, keep_mtp: bool = F
             return False
         if marker.get("keep_mtp", False) != keep_mtp:
             return False
+        ratios = config.get("compress_ratios")
+        if not keep_mtp and ratios is not None and len(ratios) != num_layers:
+            return False
+        if not keep_mtp and any(key.startswith("dspark_") for key in config):
+            return False
         mtp_layers = int(config.get("num_nextn_predict_layers", 0))
         if keep_mtp:
             if mtp_layers <= 0 or marker.get("num_mtp_layers") != mtp_layers:
@@ -195,6 +200,12 @@ def prepare_output_dir(dst: Path, src: Path, num_layers: int, force: bool, keep_
 
 
 def validate_mtp_weights(config: dict, weight_map: dict) -> int:
+    if (
+        any(key.startswith("dspark_") for key in config)
+        or any(name.startswith("mtp.") and name.endswith("main_proj.weight") for name in weight_map)
+        or config.get("_verl_prediction_head_type") == "dspark"
+    ):
+        raise ValueError("V4 0731 has DSpark heads, not legacy MTP; omit --keep-mtp for backbone-only RL/MOPD")
     count = int(config.get("num_nextn_predict_layers", config.get("mtp_num_layers", 0)) or 0)
     if count <= 0:
         raise ValueError("--keep-mtp requires a source checkpoint with MTP layers")
@@ -220,6 +231,18 @@ def validate_mtp_weights(config: dict, weight_map: dict) -> int:
 
 
 def adjust_cut_config(config: dict, num_layers: int, keep_mtp: bool = False) -> None:
+    dspark = config.get("_verl_prediction_head_type") == "dspark" or any(key.startswith("dspark_") for key in config)
+    if dspark and keep_mtp:
+        raise ValueError("V4 0731 DSpark heads cannot be retained as legacy MTP")
+    if dspark:
+        config["_verl_prediction_head_type"] = "dspark"
+        for key in list(config):
+            if key.startswith("dspark_"):
+                del config[key]
+        if "compress_ratios" in config:
+            if len(config["compress_ratios"]) < num_layers:
+                raise ValueError("compress_ratios must cover all retained V4 backbone layers")
+            config["compress_ratios"] = config["compress_ratios"][:num_layers]
     original_num_layers = config.get("num_hidden_layers")
     source_mtp_layers = int(config.get("num_nextn_predict_layers", config.get("mtp_num_layers", 0)) or 0)
     config["num_hidden_layers"] = num_layers

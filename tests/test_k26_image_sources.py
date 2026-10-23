@@ -20,7 +20,7 @@ class K26ImageSourcesTest(unittest.TestCase):
     def test_complete_pinned_series_and_shared_inference_unchanged(self):
         sources = image_sources(ROOT)
         self.assertEqual(set(sources), {"Megatron-LM", "Megatron-Bridge", "MindSpeed", "verl"})
-        expected = {"Megatron-LM": 6, "Megatron-Bridge": 6, "MindSpeed": 12, "verl": 3}
+        expected = {"Megatron-LM": 6, "Megatron-Bridge": 6, "MindSpeed": 12, "verl": 4}
         for name, source in sources.items():
             with self.subTest(name=name):
                 self.assertEqual(len(source["patches"]), expected[name])

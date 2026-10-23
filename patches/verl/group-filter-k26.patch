@@ -1,0 +1,213 @@
+--- a/verl/trainer/ppo/ray_trainer.py
++++ b/verl/trainer/ppo/ray_trainer.py
+@@ -1476,19 +1476,29 @@
+         )
+         next_step_profile = False
+ 
++        from verl.trainer.ppo.group_filter import GroupFilter
++
++        filter_config = self.config.algorithm.get("filter_groups")
++        group_filter = (
++            GroupFilter(filter_config, self.config.data.train_batch_size,
++                        self.config.actor_rollout_ref.rollout.n)
++            if filter_config and filter_config.get("enable", False) else None
++        )
++
+         for epoch in range(current_epoch, self.config.trainer.total_epochs):
+             for batch_dict in self.train_dataloader:
+                 if hasattr(self.actor_rollout_wg, "async_calls_finalize_fn_exec"):
+                     self.actor_rollout_wg.async_calls_finalize_fn_exec(blocking=False)
+                 metrics = {}
+-                timing_raw = {}
++                timing_raw = group_filter.timing if group_filter else {}
+ 
+                 with marked_timer("start_profile", timing_raw):
+-                    self._start_profiling(
+-                        not prev_step_profile and curr_step_profile
+-                        if self.config.global_profiler.profile_continuous_steps
+-                        else curr_step_profile
+-                    )
++                    if group_filter is None or group_filter.attempts == 0:
++                        self._start_profiling(
++                            not prev_step_profile and curr_step_profile
++                            if self.config.global_profiler.profile_continuous_steps
++                            else curr_step_profile
++                        )
+                 batch: DataProto = DataProto.from_single_dict(batch_dict)
+                 batch.meta_info["temperature"] = self.config.actor_rollout_ref.rollout.temperature
+ 
+@@ -1529,7 +1539,11 @@
+                         if curr_step_profile:
+                             self.llm_server_manager.stop_profile()
+ 
+-                        timing_raw.update(combined_gen_output.meta_info["timing"])
++                        for key, value in combined_gen_output.meta_info["timing"].items():
++                            if group_filter is not None and isinstance(value, (int, float)):
++                                timing_raw[key] = timing_raw.get(key, 0.0) + value
++                            else:
++                                timing_raw[key] = value
+                         combined_gen_output.meta_info.pop("timing", None)
+ 
+                     gen_batch_output = combined_gen_output.slice(0, num_sampled_prompts)
+@@ -1659,6 +1673,39 @@
+                         else:
+                             batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
+ 
++                        if group_filter is not None:
++                            metadata = dict(batch.meta_info)
++                            filtered = group_filter.add(batch)
++                            if filtered is None:
++                                print(
++                                    f"Group filter: {group_filter.groups}/{group_filter.target} prompts; "
++                                    f"generation batch {group_filter.attempts}, continuing sampling",
++                                    flush=True,
++                                )
++                                # Hybrid rollout sleep may discard weights (level 2).
++                                # Restore the SAME actor policy before replenishment;
++                                # there has been no optimizer step or step increment.
++                                with marked_timer("filter_groups/resume_rollout", timing_raw):
++                                    self.checkpoint_manager.update_weights(self.global_steps)
++                                continue
++                            batch = filtered
++                            batch.meta_info = metadata
++                            metrics.update(group_filter.metrics())
++                            # Rebalance the final full batch, then rebuild row-dependent metadata.
++                            if self.config.trainer.balance_batch:
++                                self._balance_batch(batch, metrics=metrics)
++                            batch.meta_info["global_token_num"] = batch.batch["attention_mask"].sum(-1).tolist()
++                            batch.meta_info["images_seqlens"] = [
++                                length
++                                for item in batch.non_tensor_batch.get("multi_modal_inputs", [])
++                                if "image_grid_thw" in item
++                                for length in item["images_seqlens"].tolist()
++                            ]
++                            reward_extra_infos_dict = {
++                                key: batch.non_tensor_batch[key].tolist()
++                                for key in reward_extra_infos_dict
++                            }
++
+                         # Compute rollout correction: IS weights, rejection sampling, and metrics
+                         # Only runs in decoupled mode (computes once per batch using stable π_old)
+                         # In bypass mode, this is skipped - actor computes metrics from evolving π_θ vs π_rollout
+@@ -1810,6 +1857,8 @@
+                 # TODO: make a canonical logger that supports various backend
+                 logger.log(data=metrics, step=self.global_steps)
+ 
++                if group_filter is not None:
++                    group_filter.reset()
+                 progress_bar.update(1)
+                 self.global_steps += 1
+ 
+@@ -1829,3 +1878,9 @@
+ 
+         # Ensure dump executor is shut down when training loop ends without reaching is_last_step
+         self._shutdown_dump_executor()
++
++        if group_filter is not None and group_filter.attempts:
++            raise ValueError(
++                f"Training data exhausted with only {group_filter.groups}/{group_filter.target} "
++                "qualified prompt groups; no optimizer update was performed for this partial batch"
++            )
+--- a/verl/trainer/config/ppo_trainer.yaml
++++ b/verl/trainer/config/ppo_trainer.yaml
+@@ -60,6 +60,12 @@
+ 
+   # Required when using verl.utils.omega_conf_to_dataclass to instantiate dataclass configs
+   _target_: verl.trainer.config.AlgoConfig
++
++  # DAPO dynamic sampling: remove prompt groups with constant rewards.
++  filter_groups:
++    enable: false
++    metric: seq_reward
++    max_num_gen_batches: 10
+ 
+   # Discount factor for future rewards
+   gamma: 1.0
+--- /dev/null
++++ b/verl/trainer/ppo/group_filter.py
+@@ -0,0 +1,85 @@
++# Copyright 2026 Individual contributors
++# SPDX-License-Identifier: Apache-2.0
++"""DAPO group filtering, shared by ordinary PPO/GRPO training.
++
++Semantics follow verl v0.6.1 recipe/dapo/dapo_ray_trainer.py:
++keep nonconstant groups and singleton groups; replenish to a full prompt batch.
++"""
++from collections import defaultdict
++
++import numpy as np
++
++
++class GroupFilter:
++    """Accumulate whole prompt groups without updating the rollout policy."""
++
++    def __init__(self, config, target_groups, samples_per_prompt):
++        self.metric = config.get("metric")
++        if not self.metric:
++            raise ValueError("algorithm.filter_groups.metric must be set when filtering is enabled")
++        self.target = int(target_groups)
++        self.samples = int(samples_per_prompt)
++        if self.target < 1 or self.samples < 1:
++            raise ValueError("Group filtering requires positive batch size and rollout.n")
++        self.limit = int(config.get("max_num_gen_batches", 0))
++        self.reset()
++
++    def reset(self):
++        self.parts = []
++        self.groups = 0
++        self.generated = 0
++        self.dropped = 0
++        self.attempts = 0
++        self.timing = {}
++
++    def add(self, batch):
++        # Import lazily so grouping validation can be tested without Ray/NPU.
++        from verl import DataProto
++
++        if self.metric == "seq_reward":
++            values = batch.batch["token_level_scores"].sum(dim=-1).detach().float().cpu().numpy()
++        elif self.metric == "seq_final_reward":
++            values = batch.batch["token_level_rewards"].sum(dim=-1).detach().float().cpu().numpy()
++        else:
++            if self.metric not in batch.non_tensor_batch:
++                raise ValueError(f"Group filter metric {self.metric!r} is absent from reward extra info")
++            values = np.asarray(batch.non_tensor_batch[self.metric], dtype=np.float64)
++        uids = batch.non_tensor_batch["uid"]
++        if values.shape != (len(uids),) or not np.isfinite(values).all():
++            raise ValueError(f"Group filter metric {self.metric!r} must contain one finite scalar per response")
++        by_uid = defaultdict(list)
++        for index, uid in enumerate(uids):
++            by_uid[uid].append(index)
++        if any(len(indices) != self.samples for indices in by_uid.values()):
++            raise ValueError("Group filter received incomplete prompt groups; check rollout.n and uid")
++        kept = [indices for indices in by_uid.values()
++                if len(indices) == 1 or np.std(values[indices]) > 0]
++        self.attempts += 1
++        self.generated += len(by_uid)
++        self.dropped += len(by_uid) - len(kept)
++        # Regroup before truncation: token balancing may have interleaved groups.
++        kept = kept[:max(0, self.target - self.groups)]
++        if kept:
++            selected = batch[[i for indices in kept for i in indices]]
++            selected.meta_info = {}  # Per-generation metadata cannot be concatenated.
++            self.parts.append(selected)
++            self.groups += len(kept)
++        if self.groups < self.target:
++            if self.limit > 0 and self.attempts >= self.limit:
++                raise ValueError(
++                    f"Group filter collected {self.groups}/{self.target} prompt groups after "
++                    f"{self.attempts} generation batches (max_num_gen_batches={self.limit}); "
++                    "check reward diversity or increase the limit"
++                )
++            return None
++        result = self.parts[0] if len(self.parts) == 1 else DataProto.concat(self.parts)
++        return result
++
++    def metrics(self):
++        return {
++            "filter_groups/num_gen_batches": self.attempts,
++            "filter_groups/generated_groups": self.generated,
++            "filter_groups/dropped_groups": self.dropped,
++            "filter_groups/kept_groups": self.groups,
++            "filter_groups/keep_ratio": (self.generated - self.dropped) / max(1, self.generated),
++        }

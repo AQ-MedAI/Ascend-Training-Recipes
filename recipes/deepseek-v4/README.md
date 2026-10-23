@@ -85,3 +85,38 @@ defaults to `MTP_ENABLE`. Prebuilt model paths must contain the retained MTP wei
 CPU tests cover mapping/export, TP projection, mHC-stream gradients, CP token
 boundaries, auxiliary-loss backpropagation and real safetensors cropping. NPU
 training, checkpoint resume and numerical comparisons still require runtime validation.
+
+## DeepSeek V4 Flash 0731 (backbone RL/MOPD)
+
+The official 0731 index has the same non-`mtp.*` tensor names as the earlier V4
+Flash checkpoint. No backbone tensor renaming is needed. Its `mtp.0/1/2` blocks
+belong to the DSpark prediction module: `main_proj/main_norm`, Markov and
+confidence heads do not map to legacy `e_proj/h_proj/enorm/hnorm` parameters.
+This recipe supports backbone training only; DSpark head training/speculative
+decoding is not enabled. Legacy V4 MTP training retains its existing behavior.
+
+Use the prepared BF16 0731 checkpoint with all three model MTP switches disabled:
+
+```bash
+MODEL_PATH=/path/to/deepseek-v4-flash-0731-bf16 \
+MTP_ENABLE=False MTP_ENABLE_TRAIN=False \
+bash recipes/deepseek-v4/dsv4_flash_rl.sh
+```
+
+The same settings apply to `dsv4_flash_mopd.sh` (configure its teacher paths as
+usual). The scripts already set `model.mtp.enable_rollout=False`. The in-memory
+model config and vLLM HF overrides disable prediction heads and retain only the
+backbone compression ratios. A model-only HF export advertises no MTP/DSpark
+heads, because these heads were not trained or exported. The source checkpoint
+is never edited. An explicit request to enable a DSpark head fails early.
+
+For a smoke crop, omit `--keep-mtp`. The helper removes all `mtp.*` tensors and
+DSpark settings, clips compression ratios to the retained backbone, and rejects
+stale crops with the old 46-entry ratio list. `--keep-mtp` is supported for legacy
+V4 checkpoints, but rejected for 0731/DSpark before changing the output directory.
+
+Source contract: [official index](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/blob/main/model.safetensors.index.json)
+and [configuration](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731/blob/main/config.json).
+Run `python -m unittest discover -s tests -p 'test_v4_0731.py'` for CPU checks.
+These checks verify names/config and tiny safetensors conversion; they do not
+verify full-checkpoint tensor shapes, NPU execution or rollout numerical parity.

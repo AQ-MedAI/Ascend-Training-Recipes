@@ -1,0 +1,107 @@
+--- /dev/null
++++ b/verl/utils/deepseek_v4.py
+@@ -0,0 +1,66 @@
++# Copyright 2026 Individual contributors
++# SPDX-License-Identifier: Apache-2.0
++"""Backbone-only compatibility for official DeepSeek V4 Flash 0731 / DSpark."""
++from collections.abc import Mapping
++
++
++def _get(config, name, default=None):
++    return config.get(name, default) if isinstance(config, Mapping) else getattr(config, name, default)
++
++
++def _set(config, name, value):
++    if isinstance(config, dict):
++        config[name] = value
++    else:
++        setattr(config, name, value)
++
++
++def normalize_v4_dspark_config(hf_config, mtp_config):
++    """Select the 0731/DSpark backbone, never reinterpret DSpark as legacy MTP.
++
++    This changes only the in-memory/export config, not the source checkpoint.
++    Legacy V4 MTP and non-V4 models retain their existing behavior.
++    """
++    if _get(hf_config, "model_type") != "deepseek_v4":
++        return False
++    fields = dict(hf_config) if isinstance(hf_config, Mapping) else vars(hf_config)
++    dspark = fields.get("_verl_prediction_head_type") == "dspark" or any(
++        name.startswith("dspark_") for name in fields
++    )
++    if not dspark:
++        return False
++    if any(_get(mtp_config, key, False) for key in ("enable", "enable_train", "enable_rollout")):
++        raise ValueError(
++            "DeepSeek V4 0731 uses DSpark prediction heads, not legacy V4 MTP. "
++            "Only backbone RL/MOPD is supported: set actor_rollout_ref.model.mtp."
++            "{enable,enable_train,enable_rollout}=False. DSpark tensors must not be "
++            "renamed to legacy e_proj/h_proj/enorm/hnorm weights."
++        )
++    layers = _get(hf_config, "num_hidden_layers")
++    ratios = _get(hf_config, "compress_ratios")
++    if ratios is not None:
++        if not isinstance(layers, int) or layers <= 0 or len(ratios) < layers:
++            raise ValueError("V4 DSpark compress_ratios must cover every backbone layer")
++        _set(hf_config, "compress_ratios", list(ratios[:layers]))
++    _set(hf_config, "num_nextn_predict_layers", 0)
++    _set(hf_config, "mtp_num_layers", 0)
++    _set(hf_config, "_verl_prediction_head_type", "dspark")
++    # A backbone-only HF export must not advertise missing DSpark weights.
++    for name in list(fields):
++        if name.startswith("dspark_"):
++            if isinstance(hf_config, dict):
++                hf_config.pop(name, None)
++            else:
++                delattr(hf_config, name)
++    return True
++
++
++def v4_backbone_rollout_overrides(hf_config):
++    """vLLM reloads config.json from disk; pass the normalized head settings too."""
++    if _get(hf_config, "_verl_prediction_head_type") != "dspark":
++        return {}
++    overrides = {"num_nextn_predict_layers": 0, "mtp_num_layers": 0}
++    ratios = _get(hf_config, "compress_ratios")
++    if ratios is not None:
++        overrides["compress_ratios"] = list(ratios)
++    return overrides
+--- a/verl/workers/config/model.py
++++ b/verl/workers/config/model.py
+@@ -221,6 +221,10 @@
+         override_config_kwargs.update(override_config)
+         update_model_config(self.hf_config, override_config_kwargs=override_config_kwargs)
+ 
++        from verl.utils.deepseek_v4 import normalize_v4_dspark_config
++
++        normalize_v4_dspark_config(self.hf_config, self.mtp)
++
+         self.share_embeddings_and_output_weights = getattr(self.hf_config, "tie_word_embeddings", False)
+ 
+         # get model architectures
+--- a/verl/utils/megatron_utils.py
++++ b/verl/utils/megatron_utils.py
+@@ -1508,6 +1508,9 @@
+         - mtp.enable == True and has MTP layers: configure override_transformer_config
+         - mtp.enable == True and no MTP layers: raise ValueError
+     """
++    from verl.utils.deepseek_v4 import normalize_v4_dspark_config
++
++    normalize_v4_dspark_config(model_config.hf_config, model_config.mtp)
+     has_mtp = (
+         model_config.hf_config.num_nextn_predict_layers > 0
+         if hasattr(model_config.hf_config, "num_nextn_predict_layers")
+--- a/verl/workers/rollout/vllm_rollout/vllm_async_server.py
++++ b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+@@ -257,6 +257,10 @@
+             set_expandable_segments(True)
+ 
+         quantization, hf_overrides = self._apply_quantization()
++        from verl.utils.deepseek_v4 import normalize_v4_dspark_config, v4_backbone_rollout_overrides
++
++        normalize_v4_dspark_config(self.model_config.hf_config, self.config.mtp or {})
++        hf_overrides.update(v4_backbone_rollout_overrides(self.model_config.hf_config))
+ 
+         compilation_config = engine_kwargs.pop("compilation_config", None) or {}
+         if isinstance(compilation_config, str):
