@@ -1,0 +1,246 @@
+diff --git a/verl/trainer/distillation/megatron/full_vocab_kl.py b/verl/trainer/distillation/megatron/full_vocab_kl.py
+index 52cb79b..4997552 100644
+--- a/verl/trainer/distillation/megatron/full_vocab_kl.py
++++ b/verl/trainer/distillation/megatron/full_vocab_kl.py
+@@ -35,7 +35,9 @@ padded (``bshd``) layout produced by ``preprocess_thd_engine`` /
+ ``preprocess_bshd_engine`` on the nested ``input_ids``. Teacher hidden state row
+ ``t`` of sample ``i`` is the pre-lm_head activation at sequence position ``t``
+ (predicting token ``t + 1``), so it aligns 1:1 with student logits row ``t`` for
+-``t in [0, S_i - 1)``; the student's last row of each sample has no teacher
++``t in [0, S_i - 1)`` for shared prompts. Rubric-conditioned artifacts
++carry separate student row coordinates: teacher response row k maps to student
++response row k despite different prefix lengths. The student's last row has no teacher
+ target and is filled with zeros (its loss is dropped by the downstream response
+ mask, exactly like the top-k path). The hidden rows are re-packed with the same
+ preprocess functions used for the model inputs, so CP zigzag/contiguous
+@@ -400,6 +402,38 @@ def compute_reverse_kl_full_vocab(
+     )
+ 
+ 
++def _student_artifact_row_range(artifact: dict, seqlen: int, sample_index: int) -> tuple[int, int]:
++    """Validate teacher source rows and return their explicit student destination.
++
++    Legacy artifacts use identical teacher/student coordinates. Privileged
++    prompts carry a separate student mapping; both ranges must cover the same
++    number of prediction rows, ending immediately before each final token.
++    """
++    teacher_len = int(artifact.get("sequence_length", seqlen))
++    source_start = int(artifact.get("row_start", 0))
++    source_end = int(artifact.get("row_end", teacher_len - 1))
++    if not 0 <= source_start < source_end <= teacher_len - 1:
++        raise ValueError(f"Invalid teacher source row range for sample {sample_index}: {artifact}")
++    mapping_keys = ("student_sequence_length", "student_row_start", "student_row_end")
++    if any(key in artifact for key in mapping_keys):
++        if not all(key in artifact for key in mapping_keys):
++            raise ValueError(f"Incomplete student row mapping for sample {sample_index}")
++        student_len, start, end = (int(artifact[key]) for key in mapping_keys)
++        if (
++            student_len != seqlen
++            or not 0 <= start < end == seqlen - 1
++            or source_end != teacher_len - 1
++            or end - start != source_end - source_start
++        ):
++            raise ValueError(f"Invalid teacher/student response row mapping for sample {sample_index}: {artifact}; "
++                             f"student sequence length is {seqlen}")
++        return start, end
++    if teacher_len != seqlen:
++        raise ValueError(f"Teacher hidden artifact for sample {sample_index} has sequence_length={teacher_len}, "
++                         f"but student sequence length is {seqlen}; an explicit student row mapping is required")
++    return source_start, source_end
++
++
+ def compute_full_vocab_kl(
+     *,
+     reverse: bool,
+@@ -468,14 +502,7 @@ def compute_full_vocab_kl(
+     hiddens = multi_get_hidden(artifacts=artifacts, device=device)
+     row_ranges = []
+     for i, (hidden, seqlen, artifact) in enumerate(zip(hiddens, seqlens, artifacts, strict=True)):
+-        artifact_seqlen = int(artifact.get("sequence_length", seqlen))
+-        row_start = int(artifact.get("row_start", 0))
+-        row_end = int(artifact.get("row_end", seqlen - 1))
+-        if artifact_seqlen != seqlen or not 0 <= row_start < row_end <= seqlen - 1:
+-            raise ValueError(
+-                f"Teacher hidden artifact for sample {i} has sequence_length={artifact_seqlen}, "
+-                f"row range=[{row_start}, {row_end}), but the student sequence length is {seqlen}."
+-            )
++        row_start, row_end = _student_artifact_row_range(artifact, seqlen, i)
+         expected_rows = row_end - row_start
+         if hidden.dim() != 2 or hidden.size(0) != expected_rows:
+             raise ValueError(
+diff --git a/verl/utils/checkpoint/megatron_checkpoint_manager.py b/verl/utils/checkpoint/megatron_checkpoint_manager.py
+index daf0bb7..a9891f5 100644
+--- a/verl/utils/checkpoint/megatron_checkpoint_manager.py
++++ b/verl/utils/checkpoint/megatron_checkpoint_manager.py
+@@ -612,7 +612,6 @@ class MegatronCheckpointManager(BaseCheckpointManager):
+         if self._uses_swap_optimizer():
+             # Live worker evidence, rather than a driver-side import assumption.
+             import hashlib
+-            import inspect
+             from pathlib import Path
+             from mindspeed.core.optimizer.swap_optimizer.swap_optimizer import SwapDistributedOptimizer
+             from megatron.core.optimizer.distrib_optimizer import DistributedOptimizer
+diff --git a/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py b/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
+index 26ec2eb..9ed6506 100644
+--- a/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
++++ b/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
+@@ -92,6 +92,8 @@ def install_hidden_capture(
+             capture relies on vLLM v1 prompt-logprobs plumbing), or if a second
+             capture arrives before the previous one was fetched.
+     """
++    setattr(model_runner, "_full_vocab_capture_hook_calls", 0)
++    setattr(model_runner, "_full_vocab_capture_last_shape", None)
+     setattr(model_runner, _CAPTURE_HIDDEN_ENABLED_ATTR, capture_hidden)
+     setattr(model_runner, _CAPTURE_ROW_START_ATTR, row_start)
+     setattr(model_runner, _CAPTURE_ROW_END_ATTR, row_end)
+@@ -116,6 +118,8 @@ def install_hidden_capture(
+         # Hidden states are replicated across TP ranks.  Keep the wrapper active
+         # everywhere (to avoid prompt-logits materialization), but copy only the
+         # designated TP rank's tensor to CPU.
++        self._full_vocab_capture_hook_calls += 1
++        self._full_vocab_capture_last_shape = list(hidden_states.shape)
+         if not getattr(self, _CAPTURE_HIDDEN_ENABLED_ATTR, True):
+             return {}
+ 
+@@ -179,6 +183,42 @@ def uninstall_hidden_capture(model_runner) -> None:
+         delattr(model_runner, _CAPTURE_ROW_END_ATTR)
+ 
+ 
++def _encode_hidden_payload(hidden: torch.Tensor) -> dict[str, Any]:
++    """Use native MessagePack values; untyped vLLM utility RPC loses Tensor types."""
++    if hidden.dim() != 2 or hidden.dtype not in (torch.bfloat16, torch.float16, torch.float32):
++        raise ValueError(f"Unsupported full-vocab hidden tensor: shape={tuple(hidden.shape)}, dtype={hidden.dtype}")
++    if any(size < 1 for size in hidden.shape):
++        raise ValueError(f"Empty full-vocab hidden tensor: {tuple(hidden.shape)}")
++    hidden = hidden.detach().to("cpu").contiguous()
++    return {
++        "format": "verl.full_vocab_hidden.v1",
++        "dtype": str(hidden.dtype).removeprefix("torch."),
++        "shape": list(hidden.shape),
++        "data": hidden.view(torch.uint8).numpy().tobytes(),
++    }
++
++
++def _decode_hidden_payload(payload: dict[str, Any]) -> torch.Tensor:
++    """Validate an explicit wire format without pickle or raw tensor descriptors."""
++    dtypes = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
++    dtype_name, shape, data = payload.get("dtype"), payload.get("shape"), payload.get("data")
++    if not isinstance(dtype_name, str) or dtype_name not in dtypes:
++        raise ValueError(f"Unsupported full-vocab hidden dtype: {dtype_name!r}")
++    if (
++        not isinstance(shape, (list, tuple))
++        or len(shape) != 2
++        or any(type(size) is not int or size < 1 for size in shape)
++    ):
++        raise ValueError(f"Invalid full-vocab hidden shape: {shape!r}")
++    dtype = dtypes[dtype_name]
++    expected = shape[0] * shape[1] * torch.empty((), dtype=dtype).element_size()
++    if not isinstance(data, bytes) or len(data) != expected:
++        raise ValueError(f"Invalid full-vocab hidden data: expected {expected} bytes")
++    # Own a writable buffer so the result survives RPC-buffer reuse and supports
++    # downstream operations without exposing immutable MessagePack memory.
++    return torch.frombuffer(bytearray(data), dtype=dtype).reshape(shape)
++
++
+ def unwrap_captured_hidden(rpc_result: Any) -> Optional[torch.Tensor]:
+     """Pick the rank-0 capture out of a ``collective_rpc`` result.
+ 
+@@ -188,6 +228,8 @@ def unwrap_captured_hidden(rpc_result: Any) -> Optional[torch.Tensor]:
+     pre-lm_head hidden states, so the first non-None tensor (rank 0) is the one
+     to use. Returns None if no worker captured anything.
+     """
++    if isinstance(rpc_result, dict) and rpc_result.get("format") == "verl.full_vocab_hidden.v1":
++        return _decode_hidden_payload(rpc_result)
+     if isinstance(rpc_result, torch.Tensor):
+         return rpc_result
+     if isinstance(rpc_result, (list, tuple)):
+@@ -217,6 +259,10 @@ class FullVocabHiddenWorkerExtension(vLLMColocateWorkerExtension):
+         from vllm.distributed import get_tensor_model_parallel_rank
+ 
+         tp_rank = get_tensor_model_parallel_rank()
++        logger.warning(
++            "[FVKL] start_hidden_capture: runner=%s tp_rank=%s row_range=[%s,%s)",
++            type(self.model_runner).__name__, tp_rank, row_start, row_end,
++        )
+         install_hidden_capture(
+             self.model_runner,
+             capture_hidden=tp_rank == 0,
+@@ -224,8 +270,8 @@ class FullVocabHiddenWorkerExtension(vLLMColocateWorkerExtension):
+             row_end=row_end,
+         )
+ 
+-    def fetch_captured_hidden(self) -> Optional[torch.Tensor]:
+-        """Return this worker's captured CPU hidden states (or None).
++    def fetch_captured_hidden(self) -> Optional[dict[str, Any]]:
++        """Return captured CPU hidden states as a typed byte payload (or None).
+ 
+         Consume-once: the buffer is cleared so a stale capture can never leak
+         into the next request.
+@@ -233,7 +279,20 @@ class FullVocabHiddenWorkerExtension(vLLMColocateWorkerExtension):
+         runner = self.model_runner
+         hidden = getattr(runner, _CAPTURED_HIDDEN_ATTR, None)
+         setattr(runner, _CAPTURED_HIDDEN_ATTR, None)
+-        return hidden
++        if hidden is not None:
++            return _encode_hidden_payload(hidden)
++        # Native MessagePack values survive the untyped utility RPC. Return
++        # diagnostics with the failed fetch instead of relying on worker INFO logs.
++        return {
++            "format": "verl.full_vocab_capture_status.v1",
++            "runner": type(runner).__name__,
++            "hook_installed": getattr(runner, _ORIGINAL_GET_PROMPT_LOGPROBS_ATTR, None) is not None,
++            "capture_enabled": getattr(runner, _CAPTURE_HIDDEN_ENABLED_ATTR, None),
++            "hook_calls": getattr(runner, "_full_vocab_capture_hook_calls", 0),
++            "last_hidden_shape": getattr(runner, "_full_vocab_capture_last_shape", None),
++            "row_start": getattr(runner, _CAPTURE_ROW_START_ATTR, None),
++            "row_end": getattr(runner, _CAPTURE_ROW_END_ATTR, None),
++        }
+ 
+ 
+ def export_hidden_to_tq(
+diff --git a/verl/workers/rollout/vllm_rollout/vllm_async_server.py b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+index 405144e..9e844a4 100644
+--- a/verl/workers/rollout/vllm_rollout/vllm_async_server.py
++++ b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+@@ -731,17 +731,39 @@ class vLLMHttpServer:
+         silent skip would silently disable distillation for the sample.
+         """
+         try:
+-            rpc_result = await self.engine.collective_rpc(method="fetch_captured_hidden")
++            # DPLBAsyncMPClient.call_utility_async broadcasts but returns only
++            # core_engines[0]. The request may have run on another DP engine.
++            # Fetch every engine once and retain every result (consume-once).
++            core = self.engine.engine_core
++            engines = getattr(core, "core_engines", ())
++            if len(engines) > 1:
++                rpc_result = await asyncio.gather(*(
++                    core._call_utility_async(
++                        "collective_rpc", "fetch_captured_hidden", None, (), {}, engine=engine
++                    )
++                    for engine in engines
++                ))
++            else:
++                rpc_result = await self.engine.collective_rpc(method="fetch_captured_hidden")
+         except Exception as exc:
+             raise RuntimeError(
+                 f"full-vocab export: fetch_captured_hidden failed (request_id={request_id}, full_vocab={full_vocab})"
+             ) from exc
+         hidden = unwrap_captured_hidden(rpc_result)
+         if hidden is None:
++            def capture_status(value):
++                if isinstance(value, (list, tuple)):
++                    return [capture_status(item) for item in value]
++                if isinstance(value, dict):
++                    if value.get("format") == "verl.full_vocab_capture_status.v1":
++                        return value
++                    return {"type": "dict", "keys": list(value.keys())}
++                return {"type": type(value).__name__}
++
+             raise RuntimeError(
+                 f"full-vocab export: no worker returned a captured hidden state "
+                 f"(request_id={request_id}, full_vocab={full_vocab}); the prefill forward did not "
+-                "produce a capture — check that start_hidden_capture ran on this engine."
++                f"produce a capture. Worker RPC status: {capture_status(rpc_result)!r}"
+             )
+         try:
+             return export_hidden_to_tq(

@@ -69,3 +69,38 @@ backbone for RL/MOPD, disables DSpark heads, preserves legacy V4 MTP behavior,
 and passes the normalized head/ratio settings to vLLM via HF overrides. Source
 checkpoints are unchanged; exported backbone-only configs do not advertise
 missing DSpark parameters. K2.6 is unaffected.
+
+### V4 / V4.1 full-vocabulary OPD runtime fixes
+
+`v4-opd-runtime.patch` follows the shared V4/V4.1 patch stack and is applied by
+`tools/setup_sources.sh` and image source preparation. It fixes three independent
+runtime issues in full-vocabulary OPD/MOPD:
+
+- Encode teacher hidden states as validated dtype/shape/byte payloads for untyped
+  vLLM utility RPC, and fetch every local DP engine instead of discarding captures
+  from engines other than the first. Failed captures now include worker status.
+- Validate explicit teacher-to-student response-row mappings when their prompt
+  lengths differ. Identical-prompt artifacts remain compatible. A custom teacher
+  prompt producer must provide all three fields: `student_sequence_length`,
+  `student_row_start`, and `student_row_end`; the teacher `sequence_length` and
+  `row_start`/`row_end` retain their original source coordinates. The response
+  token sequence must be identical; this does not align different tokenizations.
+- Use the module-level `inspect` import in checkpoint saves so HF export works
+  when swap optimizer is disabled.
+
+This patch does not add a HealthBench dataset, privileged-prompt worker or OPSD
+launcher, and does not change K26. Prepare sources with
+`bash tools/setup_sources.sh v4` (or `v41`) and restart all training/teacher
+workers; rebuild images to distribute the fix. Previous managed V4/V4.1 trees
+are retained in the manifest for verified migration.
+
+CPU regressions reconstruct the managed source stack in a temporary directory:
+
+```bash
+python -m unittest discover -s tests -p 'test_v4_opd_*.py' -v
+```
+
+The tests cover typed RPC payloads, nonfirst DP-engine captures, forward/reverse
+KL values and gradients with different prompt lengths, and both HF save branches.
+MessagePack round-trip coverage requires `msgspec`. NPU/multi-node validation is
+still required in the target runtime.
