@@ -1,0 +1,223 @@
+diff --git a/verl/workers/config/distillation.py b/verl/workers/config/distillation.py
+index d63a5ee3..fae71e80 100644
+--- a/verl/workers/config/distillation.py
++++ b/verl/workers/config/distillation.py
+@@ -219,33 +219,14 @@ class DistillationTeacherModelConfig(BaseConfig):
+             self._validate_topk_logprobs(use_topk=use_topk, topk=topk)
+ 
+     def _validate_full_vocab_inference(self) -> None:
+-        # Full-vocab KL exports per-request hidden states; exactly one request per engine
+-        # forward keeps the exported hidden states aligned with the request.
++        # Capture is serialized per server; chunks are assembled by request and
++        # absolute token position before exporting the supervision rows.
+         if self.inference.max_num_seqs != 1:
+             raise ValueError(
+                 "Full-vocab distillation requires the teacher inference engine to process one request "
+                 f"at a time, but got max_num_seqs={self.inference.max_num_seqs}. Please set "
+                 "distillation.teacher_models.<name>.inference.max_num_seqs=1."
+             )
+-        if self.inference.enable_chunked_prefill:
+-            raise ValueError(
+-                "Full-vocab distillation requires chunked prefill to be disabled so that each teacher "
+-                "forward contains exactly one complete request, but got enable_chunked_prefill=True. "
+-                "Please set distillation.teacher_models.<name>.inference.enable_chunked_prefill=false."
+-            )
+-        if self.inference.max_num_batched_tokens < self.inference.max_model_len:
+-            # On vLLM v1, enable_chunked_prefill=False does NOT stop the scheduler from
+-            # splitting a prompt longer than max_num_batched_tokens into multiple prefill
+-            # steps. The hidden-state capture keeps only the last forward, so a chunked
+-            # prefill silently exports just the tail chunk of the sample.
+-            raise ValueError(
+-                "Full-vocab distillation requires the teacher prefill to run in a single "
+-                f"forward, but max_num_batched_tokens={self.inference.max_num_batched_tokens} < "
+-                f"max_model_len={self.inference.max_model_len}: longer samples would be chunked "
+-                "and only the tail chunk's hidden states would be captured. Please set "
+-                "distillation.teacher_models.<name>.inference.max_num_batched_tokens >= "
+-                "max_model_len."
+-            )
+ 
+     def _validate_topk_logprobs(self, use_topk: bool, topk: Optional[int]) -> None:
+         if not use_topk:
+diff --git a/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py b/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
+index 9ed65069..6b86bbda 100644
+--- a/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
++++ b/verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py
+@@ -35,12 +35,10 @@ Flow per request (all driven by ``vLLMHttpServer.generate``):
+    deliberately avoids ``model.compute_logits``: vLLM
+    v1 calls it twice per step (once with the per-request sampling rows, once
+    with the prompt-logprobs rows) with an indistinguishable signature.
+-2. The normal prefill-only ``engine.generate`` runs. Teacher inference is
+-   configured with ``max_num_seqs=1`` and ``enable_chunked_prefill=False`` plus
+-   ``max_num_batched_tokens >= max_model_len`` (enforced by the config layer),
+-   so one forward contains exactly one complete request and the captured
+-   ``[seq_len, H]`` tensor belongs to that request — no per-request splitting
+-   is needed.
++2. The prefill-only ``engine.generate`` runs with ``max_num_seqs=1``.
++   Chunked prefill is supported: scheduler metadata identifies each request's
++   hidden rows and absolute token positions. Only the requested supervision
++   interval is accumulated on CPU, including chunks recomputed after preemption.
+ 3. Only TP rank 0 copies the replicated hidden states to CPU.  For online
+    distillation it copies just the rows predicting response tokens; prompt rows
+    are still computed for causal attention but are not transferred.
+@@ -75,12 +73,13 @@ def install_hidden_capture(
+     capture_hidden: bool = True,
+     row_start: Optional[int] = None,
+     row_end: Optional[int] = None,
++    request_id: Optional[str] = None,
+ ) -> None:
+     """Wrap ``model_runner._get_prompt_logprobs_dict`` to capture its hidden input.
+ 
+     When ``capture_hidden`` is true, the captured tensor is detached and copied
+     to CPU (synchronously) and stored on the runner under
+-    ``_full_vocab_captured_hidden``; only the last step's capture is kept.  All
++   ``_full_vocab_captured_hidden`` at their absolute request offsets. All
+     tensor-parallel ranks install the wrapper so none of them materialize prompt
+     logits, but only TP rank 0 enables the expensive hidden-state copy.
+     Idempotent: re-installing on an already-wrapped runner only clears the stale
+@@ -89,11 +88,14 @@ def install_hidden_capture(
+ 
+     Raises:
+         RuntimeError: if the runner has no ``_get_prompt_logprobs_dict`` (the
+-            capture relies on vLLM v1 prompt-logprobs plumbing), or if a second
+-            capture arrives before the previous one was fetched.
++            capture relies on vLLM v1 prompt-logprobs plumbing), or request
++            metadata is inconsistent.
+     """
+     setattr(model_runner, "_full_vocab_capture_hook_calls", 0)
+     setattr(model_runner, "_full_vocab_capture_last_shape", None)
++    model_runner._full_vocab_request_id = request_id
++    model_runner._full_vocab_engine_request_id = None
++    model_runner._full_vocab_coverage = None
+     setattr(model_runner, _CAPTURE_HIDDEN_ENABLED_ATTR, capture_hidden)
+     setattr(model_runner, _CAPTURE_ROW_START_ATTR, row_start)
+     setattr(model_runner, _CAPTURE_ROW_END_ATTR, row_end)
+@@ -112,9 +114,8 @@ def install_hidden_capture(
+         )
+ 
+     def _get_prompt_logprobs_dict(self, hidden_states, *args, **kwargs):
+-        # hidden_states: the step's full prefill hidden [num_tokens, H], already
+-        # sliced to the scheduled tokens. With max_num_seqs=1 and a single-pass
+-        # prefill this is exactly the [seq_len, H] of the one in-flight request.
++        # hidden_states contains this step's scheduled tokens, not necessarily
++        # the complete request. Metadata below maps them to absolute positions.
+         # Hidden states are replicated across TP ranks.  Keep the wrapper active
+         # everywhere (to avoid prompt-logits materialization), but copy only the
+         # designated TP rank's tensor to CPU.
+@@ -123,6 +124,56 @@ def install_hidden_capture(
+         if not getattr(self, _CAPTURE_HIDDEN_ENABLED_ATTR, True):
+             return {}
+ 
++        scheduled = args[0] if args else kwargs.get("num_scheduled_tokens")
++        if scheduled is not None:
++            for req_id, count in scheduled.items():
++                expected_id = self._full_vocab_engine_request_id
++                external_id = self._full_vocab_request_id
++                if expected_id is None and external_id is not None:
++                    # vLLM assigns an internal ID by appending an eight-character UUID.
++                    suffix = req_id.removeprefix(external_id + "-")
++                    if req_id != external_id and not (
++                        req_id.startswith(external_id + "-") and len(suffix) == 8
++                    ):
++                        raise RuntimeError(f"Unexpected full-vocab request {req_id!r}; expected {external_id!r}")
++                if expected_id is not None and req_id != expected_id:
++                    raise RuntimeError(f"Unexpected full-vocab request {req_id!r}; expected {expected_id!r}")
++                self._full_vocab_engine_request_id = req_id
++                request = self.requests[req_id]
++                prompt_len = len(request.prompt_token_ids)
++                start = request.num_computed_tokens
++                end = min(start + count, prompt_len)
++                capture_start = getattr(self, _CAPTURE_ROW_START_ATTR, None)
++                capture_end = getattr(self, _CAPTURE_ROW_END_ATTR, None)
++                if (capture_start is None) != (capture_end is None):
++                    raise RuntimeError("full-vocab hidden capture requires both row_start and row_end")
++                lo = 0 if capture_start is None else capture_start
++                hi = prompt_len - 1 if capture_end is None else capture_end
++                if not 0 <= lo < hi <= prompt_len:
++                    raise RuntimeError(f"Invalid full-vocab row range [{lo}, {hi}) for {prompt_len} tokens")
++                left, right = max(start, lo), min(end, hi)
++                if left >= right:
++                    continue
++                req_idx = self.input_batch.req_id_to_index[req_id]
++                offset = int(self.query_start_loc.np[req_idx])
++                rows = hidden_states[offset + left - start:offset + right - start]
++                if rows.shape[0] != right - left:
++                    raise RuntimeError("Full-vocab scheduled hidden rows are missing")
++                target = getattr(self, _CAPTURED_HIDDEN_ATTR, None)
++                if target is None:
++                    target = torch.empty((hi - lo, rows.shape[1]), dtype=rows.dtype, device="cpu")
++                    setattr(self, _CAPTURED_HIDDEN_ATTR, target)
++                    self._full_vocab_coverage = torch.zeros(hi - lo, dtype=torch.bool)
++                if target.shape != (hi - lo, rows.shape[1]) or target.dtype != rows.dtype:
++                    raise RuntimeError("Full-vocab hidden shape or dtype changed between chunks")
++                # Absolute positions also handle recomputed chunks after preemption.
++                target[left - lo:right - lo].copy_(rows.detach(), non_blocking=False)
++                self._full_vocab_coverage[left - lo:right - lo] = True
++            return {}
++
++        if self._full_vocab_request_id is not None:
++            raise RuntimeError("Full-vocab chunk capture requires scheduler token metadata")
++
+         capture_start = getattr(self, _CAPTURE_ROW_START_ATTR, None)
+         capture_end = getattr(self, _CAPTURE_ROW_END_ATTR, None)
+         if capture_start is not None or capture_end is not None:
+@@ -181,6 +232,9 @@ def uninstall_hidden_capture(model_runner) -> None:
+         delattr(model_runner, _CAPTURE_ROW_START_ATTR)
+     if hasattr(model_runner, _CAPTURE_ROW_END_ATTR):
+         delattr(model_runner, _CAPTURE_ROW_END_ATTR)
++    for name in ("_full_vocab_request_id", "_full_vocab_engine_request_id", "_full_vocab_coverage"):
++        if hasattr(model_runner, name):
++            delattr(model_runner, name)
+ 
+ 
+ def _encode_hidden_payload(hidden: torch.Tensor) -> dict[str, Any]:
+@@ -249,7 +303,10 @@ class FullVocabHiddenWorkerExtension(vLLMColocateWorkerExtension):
+     ``collective_rpc("start_hidden_capture" | "fetch_captured_hidden")``.
+     """
+ 
+-    def start_hidden_capture(self, row_start: Optional[int] = None, row_end: Optional[int] = None) -> None:
++    def start_hidden_capture(
++        self, row_start: Optional[int] = None, row_end: Optional[int] = None,
++        request_id: Optional[str] = None,
++    ) -> None:
+         """Install the capture wrapper on this worker's model runner.
+ 
+         Every TP rank skips prompt-logits materialization, while only TP rank 0
+@@ -268,6 +325,7 @@ class FullVocabHiddenWorkerExtension(vLLMColocateWorkerExtension):
+             capture_hidden=tp_rank == 0,
+             row_start=row_start,
+             row_end=row_end,
++            request_id=request_id,
+         )
+ 
+     def fetch_captured_hidden(self) -> Optional[dict[str, Any]]:
+@@ -279,6 +337,13 @@ class FullVocabHiddenWorkerExtension(vLLMColocateWorkerExtension):
+         runner = self.model_runner
+         hidden = getattr(runner, _CAPTURED_HIDDEN_ATTR, None)
+         setattr(runner, _CAPTURED_HIDDEN_ATTR, None)
++        coverage = getattr(runner, "_full_vocab_coverage", None)
++        runner._full_vocab_coverage = None
++        if coverage is not None and not bool(coverage.all()):
++            raise RuntimeError(
++                f"Incomplete full-vocab capture for {runner._full_vocab_request_id!r}: "
++                f"missing {int((~coverage).sum())} hidden rows"
++            )
+         if hidden is not None:
+             return _encode_hidden_payload(hidden)
+         # Native MessagePack values survive the untyped utility RPC. Return
+diff --git a/verl/workers/rollout/vllm_rollout/vllm_async_server.py b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+index 9e844a49..c7b48f46 100644
+--- a/verl/workers/rollout/vllm_rollout/vllm_async_server.py
++++ b/verl/workers/rollout/vllm_rollout/vllm_async_server.py
+@@ -610,7 +610,11 @@ class vLLMHttpServer:
+                     capture_started = time.monotonic()
+                     await self.engine.collective_rpc(
+                         method="start_hidden_capture",
+-                        kwargs={"row_start": full_vocab.get("row_start"), "row_end": full_vocab.get("row_end")},
++                        kwargs={
++                            "row_start": full_vocab.get("row_start"),
++                            "row_end": full_vocab.get("row_end"),
++                            "request_id": request_id,
++                        },
+                     )
+                     _mopd_debug(
+                         f"full-vocab capture ready: request_id={request_id}, "

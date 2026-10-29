@@ -141,6 +141,76 @@ class HiddenRpcTest(unittest.TestCase):
         self.assertEqual(status['last_hidden_shape'], [5, 3])
         original.assert_not_called()
 
+    def test_chunked_capture_matches_complete_rows_and_handles_recompute(self):
+        hidden = torch.arange(60).reshape(20, 3).to(torch.bfloat16)
+        for row_range in ((None, None), (7, 18), (9, 16), (18, 19)):
+            runner = SimpleNamespace(
+                _get_prompt_logprobs_dict=Mock(),
+                requests={'req': SimpleNamespace(prompt_token_ids=list(range(20)), num_computed_tokens=0)},
+                input_batch=SimpleNamespace(req_id_to_index={'req': 0}),
+                query_start_loc=SimpleNamespace(np=[0]),
+            )
+            extension = self.ns['FullVocabHiddenWorkerExtension']()
+            extension.model_runner = runner
+            self.ns['install_hidden_capture'](runner, request_id='req',
+                                              row_start=row_range[0], row_end=row_range[1])
+            # Repeated offsets simulate preemption/recomputation, not extra tokens.
+            for start, end in ((0, 4), (4, 9), (0, 4), (4, 9), (9, 16), (16, 20)):
+                runner.requests['req'].num_computed_tokens = start
+                chunk = hidden[start:end].clone()
+                runner._get_prompt_logprobs_dict(chunk, {'req': end - start})
+                chunk.zero_()  # Runner reuses its device buffer after the hook.
+            actual = self.unwrap(extension.fetch_captured_hidden())
+            lo, hi = row_range
+            torch.testing.assert_close(actual, hidden[0 if lo is None else lo:19 if hi is None else hi])
+            self.assertIsNone(self.unwrap(extension.fetch_captured_hidden()))
+
+    def test_chunk_capture_rejects_gaps_and_foreign_requests(self):
+        runner = SimpleNamespace(
+            _get_prompt_logprobs_dict=Mock(),
+            requests={'req': SimpleNamespace(prompt_token_ids=list(range(10)), num_computed_tokens=5)},
+            input_batch=SimpleNamespace(req_id_to_index={'req': 0}),
+            query_start_loc=SimpleNamespace(np=[0]),
+        )
+        self.ns['install_hidden_capture'](runner, request_id='req')
+        runner._get_prompt_logprobs_dict(torch.ones(5, 3), {'req': 5})
+        extension = self.ns['FullVocabHiddenWorkerExtension']()
+        extension.model_runner = runner
+        with self.assertRaisesRegex(RuntimeError, 'missing 5 hidden rows'):
+            extension.fetch_captured_hidden()
+        with self.assertRaisesRegex(RuntimeError, 'Unexpected full-vocab request'):
+            runner._get_prompt_logprobs_dict(torch.ones(5, 3), {'other': 5})
+
+    def test_internal_request_id_and_hidden_offset(self):
+        runner = SimpleNamespace(
+            _get_prompt_logprobs_dict=Mock(),
+            requests={'req-ab12cd34': SimpleNamespace(prompt_token_ids=[1, 2, 3], num_computed_tokens=0)},
+            input_batch=SimpleNamespace(req_id_to_index={'req-ab12cd34': 0}),
+            query_start_loc=SimpleNamespace(np=[2]),
+        )
+        self.ns['install_hidden_capture'](runner, request_id='req')
+        hidden = torch.arange(15).reshape(5, 3).float()
+        runner._get_prompt_logprobs_dict(hidden, {'req-ab12cd34': 3})
+        extension = self.ns['FullVocabHiddenWorkerExtension']()
+        extension.model_runner = runner
+        torch.testing.assert_close(self.unwrap(extension.fetch_captured_hidden()), hidden[2:4])
+        with self.assertRaisesRegex(RuntimeError, 'Unexpected full-vocab request'):
+            runner._get_prompt_logprobs_dict(hidden, {'req-ffffffff': 3})
+
+    def test_full_vocab_config_allows_chunked_prefill(self):
+        source = ROOT / 'verl/workers/config/distillation.py'
+        node = next(node for node in ast.walk(ast.parse(source.read_text()))
+                    if isinstance(node, ast.FunctionDef) and node.name == '_validate_full_vocab_inference')
+        namespace = {}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), 'exec'), namespace)
+        config = SimpleNamespace(inference=SimpleNamespace(
+            max_num_seqs=1, enable_chunked_prefill=True,
+            max_num_batched_tokens=4096, max_model_len=65536))
+        namespace[node.name](config)
+        config.inference.max_num_seqs = 2
+        with self.assertRaises(ValueError):
+            namespace[node.name](config)
+
 
 if __name__ == "__main__":
     unittest.main()

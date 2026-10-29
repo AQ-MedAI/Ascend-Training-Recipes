@@ -104,3 +104,14 @@ The tests cover typed RPC payloads, nonfirst DP-engine captures, forward/reverse
 KL values and gradients with different prompt lengths, and both HF save branches.
 MessagePack round-trip coverage requires `msgspec`. NPU/multi-node validation is
 still required in the target runtime.
+
+### Chunked teacher prefill
+
+`v4-opd-chunked-prefill.patch` follows `v4-opd-runtime.patch` for V4/V4.1.
+It accumulates response-prediction hidden rows by absolute token position across
+prefill chunks, checks complete coverage, and passes `row_start`, `row_end`, and
+`request_id` through the worker RPC. Teacher chunked prefill is supported with
+`max_num_seqs=1`; `max_num_batched_tokens` may be smaller than `max_model_len`.
+Rebuild the image and restart all teacher workers together so the RPC caller and
+worker extension use the same interface. Existing CPU RPC regressions also cover
+chunk accumulation and configuration validation. NPU validation remains required.

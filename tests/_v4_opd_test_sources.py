@@ -1,4 +1,4 @@
-"""Reconstruct only the four patched runtime modules from the managed V4 profile."""
+"""Reconstruct the patched runtime modules from the managed V4 profile."""
 import atexit
 from functools import lru_cache
 import json
@@ -20,7 +20,8 @@ def source_root():
     temporary = tempfile.TemporaryDirectory(prefix="v4-opd-regression-")
     atexit.register(temporary.cleanup)
     target = Path(temporary.name)
-    paths = ["verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py",
+    paths = ["verl/workers/config/distillation.py",
+             "verl/workers/rollout/vllm_rollout/full_vocab_hidden_export.py",
              "verl/workers/rollout/vllm_rollout/vllm_async_server.py",
              "verl/trainer/distillation/megatron/full_vocab_kl.py",
              "verl/utils/checkpoint/megatron_checkpoint_manager.py"]
